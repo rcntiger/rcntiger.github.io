@@ -312,6 +312,97 @@ const ExcelUtil = (() => {
     })
     step2.appendChild(colGrid)
 
+    // 필터 (컬럼 값 기준 포함/제외)
+    const filterWrap  = _el('div', `border:1px solid ${T.bd};border-radius:${T.r};padding:10px 12px;margin-bottom:14px`)
+    const filterHead  = _el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px')
+    const filterLbl   = _el('span', `font-size:11px;color:${T.mt};font-weight:600`, '🔍 필터:')
+    const selFilterCol = _el('select', `padding:5px 8px;font-size:12px;background:${T.sur};border:1px solid ${T.bd};color:${T.tx};border-radius:6px`)
+
+    // 포함/제외 모드 토글
+    const modeWrap = _el('div', 'display:flex;gap:4px;margin-left:4px')
+    const btnModeExclude = _el('button', '', '값 제외')
+    const btnModeInclude = _el('button', '', '값만 선택')
+    ;[btnModeExclude, btnModeInclude].forEach(b => {
+      b.style.cssText = `padding:4px 10px;font-size:11px;border-radius:14px;border:1px solid ${T.bd};background:${T.sur};color:${T.mt};cursor:pointer`
+    })
+    modeWrap.append(btnModeExclude, btnModeInclude)
+    filterHead.append(filterLbl, selFilterCol, modeWrap)
+
+    const filterValuesWrap = _el('div', 'display:flex;flex-wrap:wrap;gap:6px')
+    filterWrap.append(filterHead, filterValuesWrap)
+    step2.appendChild(filterWrap)
+
+    let _filterColIdx = null          // 필터 대상 컬럼 인덱스
+    let _filterMode    = 'exclude'    // 'exclude' | 'include'
+    let _excludedVals  = new Set()    // exclude 모드: 제외할 값
+    let _includedVals  = new Set()    // include 모드: 포함할 값
+
+    function _refreshModeButtons() {
+      const activeStyle   = `background:${T.ac};color:#fff;border-color:${T.ac}`
+      const inactiveStyle = `background:${T.sur};color:${T.mt};border-color:${T.bd}`
+      btnModeExclude.style.cssText = `padding:4px 10px;font-size:11px;border-radius:14px;border:1px solid;cursor:pointer;${_filterMode==='exclude'?activeStyle:inactiveStyle}`
+      btnModeInclude.style.cssText = `padding:4px 10px;font-size:11px;border-radius:14px;border:1px solid;cursor:pointer;${_filterMode==='include'?activeStyle:inactiveStyle}`
+    }
+    btnModeExclude.onclick = () => { _filterMode = 'exclude'; _refreshModeButtons(); _buildFilterValues(); _buildPreview() }
+    btnModeInclude.onclick = () => { _filterMode = 'include'; _refreshModeButtons(); _buildFilterValues(); _buildPreview() }
+    _refreshModeButtons()
+
+    selFilterCol.onchange = () => {
+      _filterColIdx = selFilterCol.value === '' ? null : +selFilterCol.value
+      _excludedVals = new Set()
+      _includedVals = new Set()
+      _buildFilterValues()
+      _buildPreview()
+    }
+
+    function _buildFilterColOptions() {
+      selFilterCol.innerHTML = '<option value="">-- 필터 사용 안함 --</option>' +
+        _headers.map((h, i) => `<option value="${i}">${_esc(h) || '(컬럼'+(i+1)+')'}</option>`).join('')
+      _filterColIdx = null
+      _excludedVals = new Set()
+      _includedVals = new Set()
+      filterValuesWrap.innerHTML = ''
+    }
+
+    function _buildFilterValues() {
+      filterValuesWrap.innerHTML = ''
+      if (_filterColIdx === null) return
+
+      // 고유값 + 개수 집계
+      const counts = {}
+      _rows2d.forEach(row => {
+        const v = String(row[_filterColIdx] ?? '').trim() || '(빈 값)'
+        counts[v] = (counts[v] || 0) + 1
+      })
+
+      const isExcludeMode = _filterMode === 'exclude'
+
+      Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([val, cnt]) => {
+          // exclude 모드: 기본 체크됨(포함), 체크 해제하면 제외
+          // include 모드: 기본 체크 안됨(미포함), 체크하면 포함
+          const isOn = isExcludeMode ? !_excludedVals.has(val) : _includedVals.has(val)
+
+          const chip = _el('label', `display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid ${isOn ? (isExcludeMode?T.bd:'#86efac') : '#fca5a5'};background:${isOn ? (isExcludeMode?T.sur:'#f0fdf4') : '#fef2f2'};color:${isOn ? (isExcludeMode?T.tx:'#15803d') : '#b91c1c'};text-decoration:${(!isOn && isExcludeMode) ? 'line-through' : 'none'}`)
+          chip.innerHTML = `<input type="checkbox" ${isOn ? 'checked' : ''} style="accent-color:${T.ac};width:13px;height:13px"> ${_esc(val)} <span style="color:${T.mt};font-size:10px">(${cnt})</span>`
+
+          const checkbox = chip.querySelector('input')
+          checkbox.onchange = () => {
+            if (isExcludeMode) {
+              if (checkbox.checked) _excludedVals.delete(val)
+              else _excludedVals.add(val)
+            } else {
+              if (checkbox.checked) _includedVals.add(val)
+              else _includedVals.delete(val)
+            }
+            _buildFilterValues()  // 색상 갱신을 위해 다시 그림
+            _buildPreview()
+          }
+          filterValuesWrap.appendChild(chip)
+        })
+    }
+
     // 미리보기
     const prevWrap = _el('div', `background:${T.sur};border:1px solid ${T.bd};border-radius:${T.r};padding:10px;margin-bottom:14px;overflow-x:auto;max-height:240px;overflow-y:auto`)
     const prevLbl  = _el('div', `font-size:10px;color:${T.mt};margin-bottom:6px;font-weight:600`, '미리보기 (상위 3행) — 컬럼 번호 또는 헤더 클릭하여 지정')
@@ -379,11 +470,33 @@ const ExcelUtil = (() => {
           if (found >= 0) sel.value = String(found)
         }
       })
+      _buildFilterColOptions()
       _buildPreview()
+    }
+
+    function _getFilteredRows() {
+      if (_filterColIdx === null) return _rows2d
+
+      if (_filterMode === 'exclude') {
+        if (_excludedVals.size === 0) return _rows2d
+        return _rows2d.filter(row => {
+          const v = String(row[_filterColIdx] ?? '').trim() || '(빈 값)'
+          return !_excludedVals.has(v)
+        })
+      } else {
+        // include 모드: 선택한 값이 없으면 전체 유지 (실수로 다 걸러지는 것 방지)
+        if (_includedVals.size === 0) return _rows2d
+        return _rows2d.filter(row => {
+          const v = String(row[_filterColIdx] ?? '').trim() || '(빈 값)'
+          return _includedVals.has(v)
+        })
+      }
     }
 
     function _buildPreview() {
       prevTbl.innerHTML = ''
+      const filteredRows = _getFilteredRows()
+
       const selMap = {}
       columns.forEach((col, ci) => {
         const v = colSelects[col.id]?.value
@@ -433,8 +546,8 @@ const ExcelUtil = (() => {
       })
       prevTbl.appendChild(hRow)
 
-      // 데이터 미리보기 (3행)
-      _rows2d.slice(0, 3).forEach(row => {
+      // 데이터 미리보기 (필터 적용된 데이터 기준 3행)
+      filteredRows.slice(0, 3).forEach(row => {
         const tr = document.createElement('tr')
         row.forEach((c, i) => {
           const td = _el('td', `padding:4px 8px;font-size:11px;color:${T.tx};border:1px solid ${T.bd2};white-space:nowrap;background:${selMap[i]?.color||'transparent'}`, String(c).substring(0, 24))
@@ -442,6 +555,18 @@ const ExcelUtil = (() => {
         })
         prevTbl.appendChild(tr)
       })
+
+      // 필터 적용 결과 안내
+      const hasFilter = _filterColIdx !== null && (
+        (_filterMode === 'exclude' && _excludedVals.size > 0) ||
+        (_filterMode === 'include' && _includedVals.size > 0)
+      )
+      if (hasFilter) {
+        const modeTxt = _filterMode === 'exclude' ? '제외 필터' : '선택 필터'
+        prevLbl.textContent = `미리보기 (상위 3행) — ${modeTxt} 적용: ${filteredRows.length}/${_rows2d.length}행 남음`
+      } else {
+        prevLbl.textContent = '미리보기 (상위 3행) — 컬럼 번호 또는 헤더 클릭하여 지정'
+      }
     }
 
     function _confirm() {
@@ -455,9 +580,10 @@ const ExcelUtil = (() => {
         const v = colSelects[col.id]?.value
         mapping[col.id] = (v !== '' && v !== undefined) ? +v : null
       })
+      const filteredRows = _getFilteredRows()
       hide()
-      onConfirm(_headers, _rows2d, mapping)
-      log.debug('[ExcelUtil] createReader confirm', mapping)
+      onConfirm(_headers, filteredRows, mapping)
+      log.debug(`[ExcelUtil] createReader confirm`, mapping, `필터: ${filteredRows.length}/${_rows2d.length}행`)
     }
 
     function show() { overlay.style.display = 'flex' }
