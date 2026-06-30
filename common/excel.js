@@ -313,7 +313,7 @@ const ExcelUtil = (() => {
     step2.appendChild(colGrid)
 
     // ── 필터 (여러 컬럼 동시 적용, AND 조건) ──
-    const filterWrap   = _el('div', `border:1px solid ${T.bd};border-radius:${T.r};padding:10px 12px;margin-bottom:14px`)
+    const filterWrap   = _el('div', `border:1px solid ${T.bd};border-radius:${T.r};padding:10px 12px;margin-bottom:14px;box-sizing:border-box;overflow:hidden`)
     const filterTitle  = _el('div', `display:flex;align-items:center;justify-content:space-between;margin-bottom:8px`)
     filterTitle.append(
       _el('span', `font-size:11px;color:${T.mt};font-weight:600`, '🔍 필터 (모두 만족하는 행만 포함)')
@@ -347,12 +347,12 @@ const ExcelUtil = (() => {
       if (_filters.length === 0) { filterListWrap.appendChild(filterEmptyMsg); return }
 
       _filters.forEach((f, fi) => {
-        const row = _el('div', `border:1px solid ${T.bd2};border-radius:8px;padding:8px 10px;background:${T.sur}`)
+        const row = _el('div', `border:1px solid ${T.bd2};border-radius:8px;padding:8px 10px;background:${T.sur};min-width:0;box-sizing:border-box`)
 
         // 상단: 컬럼 선택 + 모드 토글 + 삭제
         const rowTop = _el('div', 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px')
 
-        const selCol = _el('select', `padding:5px 8px;font-size:12px;background:${T.bg};border:1px solid ${T.bd};color:${T.tx};border-radius:6px`)
+        const selCol = _el('select', `padding:5px 8px;font-size:12px;background:${T.bg};border:1px solid ${T.bd};color:${T.tx};border-radius:6px;max-width:180px;flex-shrink:0`)
         selCol.innerHTML = '<option value="">-- 컬럼 선택 --</option>' +
           _headers.map((h, i) => `<option value="${i}" ${f.colIdx===i?'selected':''}>${_esc(h) || '(컬럼'+(i+1)+')'}</option>`).join('')
         selCol.onchange = () => {
