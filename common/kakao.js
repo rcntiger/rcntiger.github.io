@@ -12,7 +12,13 @@
  */
 
 const KakaoUtil = (() => {
-  const kakao = () => window.kakao.maps
+  const log = window.Logger || { debug: console.log, warn: console.warn, error: console.error }
+
+  function _checkSDK() {
+    if (!window.kakao?.maps) throw new Error('[KakaoUtil] Kakao Maps SDK가 로드되지 않았습니다. SDK 스크립트를 먼저 로드하세요.')
+  }
+
+  const kakao = () => { _checkSDK(); return window.kakao.maps }
 
   // ────────────────────────────────────────────
   // 지도 초기화
@@ -399,6 +405,44 @@ const KakaoUtil = (() => {
   }
 
   // ────────────────────────────────────────────
+  // 길찾기 (모바일 앱 딥링크 + 웹 fallback)
+  // ────────────────────────────────────────────
+
+  /**
+   * 카카오맵 길찾기 실행. 모바일이면 네이티브 앱(kakaomap://)으로 시도 후
+   * 1.5초 뒤 웹(map.kakao.com)으로 fallback, PC면 바로 웹으로 연결
+   * @param {object} from - { lat, lng, name }
+   * @param {object} to   - { lat, lng, name }
+   * @example
+   *   KakaoUtil.openNaviApp(
+   *     { lat: 37.4563, lng: 126.8955, name: '금천소방서' },
+   *     { lat: 37.50, lng: 127.03, name: '점검대상' }
+   *   )
+   */
+  function openNaviApp(from, to) {
+    const isMobile = window.Utils
+      ? window.Utils.isMobileApp()
+      : /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+    const sp = `${encodeURIComponent(from.name || '')},${from.lat},${from.lng}`
+    const ep = `${encodeURIComponent(to.name || '')},${to.lat},${to.lng}`
+    const webUrl = `https://map.kakao.com/link/by/car/${sp}/${ep}`
+
+    if (isMobile) {
+      const naviUrl = `kakaomap://route?sp=${from.lat},${from.lng}&ep=${to.lat},${to.lng}&by=CAR`
+      const el = document.createElement('a')
+      el.href = naviUrl
+      el.style.display = 'none'
+      document.body.appendChild(el)
+      el.click()
+      document.body.removeChild(el)
+      setTimeout(() => window.open(webUrl, '_blank'), 1500)
+    } else {
+      window.open(webUrl, '_blank')
+    }
+  }
+
+  // ────────────────────────────────────────────
   // Public API
   // ────────────────────────────────────────────
 
@@ -413,6 +457,7 @@ const KakaoUtil = (() => {
     moveToCurrentLocation,
     coordToAddress, addressToCoord,
     createStationManager,
+    openNaviApp,
   }
 })()
 
