@@ -299,13 +299,13 @@ const ExcelUtil = (() => {
       _el('span', `font-size:11px;color:${T.mt}`, '헤더 행:'), selHdr)
     step2.appendChild(topBar)
 
-    // 컬럼 매핑 그리드
-    const colGrid    = _el('div', 'display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:14px')
+    // 컬럼 매핑 그리드 (항상 2열 고정 — 모바일에서 화면 폭에 따라 1열로 무너지는 문제 방지)
+    const colGrid    = _el('div', 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px')
     const colSelects = {}
     columns.forEach((col) => {
-      const wrap = _el('div', '')
-      const lbl  = _el('label', `display:block;font-size:11px;color:${T.mt};margin-bottom:4px`, col.label + (col.required ? ' *' : ''))
-      const sel  = _el('select', `width:100%;padding:6px 8px;background:${T.sur};border:1px solid ${T.bd};color:${T.tx};border-radius:${T.r};font-size:12px`)
+      const wrap = _el('div', 'min-width:0')
+      const lbl  = _el('label', `display:block;font-size:11px;color:${T.mt};margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`, col.label + (col.required ? ' *' : ''))
+      const sel  = _el('select', `width:100%;padding:6px 8px;background:${T.sur};border:1px solid ${T.bd};color:${T.tx};border-radius:${T.r};font-size:12px;box-sizing:border-box`)
       colSelects[col.id] = sel
       sel.onchange = () => _buildPreview()
       wrap.append(lbl, sel); colGrid.appendChild(wrap)
