@@ -87,6 +87,43 @@ const ExcelUtil = (() => {
   /** 지원 파일 형식 (input accept 속성용) */
   const ACCEPT = '.xlsx,.xls,.csv,.ods,.tsv,.html,.htm'
 
+  /** 허용 확장자 (실제 파일 검증용) */
+  const ALLOWED_EXT = ['xlsx', 'xls', 'csv', 'ods', 'tsv', 'html', 'htm']
+
+  /** 파일 크기 상한 (25MB) — 초과 시 경고 */
+  const MAX_FILE_SIZE = 25 * 1024 * 1024
+
+  /**
+   * 파일 유효성 검증
+   * @param {File} file
+   * @returns {{ ok: boolean, error?: string }}
+   */
+  function _validateFile(file) {
+    if (!file) return { ok: false, error: '파일이 없습니다.' }
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!ALLOWED_EXT.includes(ext)) {
+      return { ok: false, error: `지원하지 않는 형식입니다 (.${ext}). ${ALLOWED_EXT.join(', ')} 만 가능합니다.` }
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return { ok: false, error: `파일이 너무 큽니다 (${(file.size/1024/1024).toFixed(1)}MB). 최대 ${MAX_FILE_SIZE/1024/1024}MB까지 가능합니다.` }
+    }
+    if (file.size === 0) {
+      return { ok: false, error: '빈 파일입니다.' }
+    }
+    return { ok: true }
+  }
+
+  /**
+   * 공통 알림 (Utils.toast 있으면 사용, 없으면 alert 폴백)
+   * @param {string} msg
+   * @param {'info'|'success'|'error'|'warning'} type
+   */
+  function _notify(msg, type = 'info') {
+    if (window.Utils?.toast) window.Utils.toast(msg, { type })
+    else if (type === 'error') alert(msg)
+    else log.info('[ExcelUtil]', msg)
+  }
+
   // ────────────────────────────────────────────
   // 병합 셀 Forward fill
   // ────────────────────────────────────────────
@@ -246,8 +283,12 @@ const ExcelUtil = (() => {
 
     let _wb = null, _headers = [], _rows2d = [], _sheetIdx = 0, _headerRow = defHdrRow
 
-    // ── DOM 생성 ──
+    // ── DOM 생성 (중복 방지: 같은 storageKey의 기존 모달 제거) ──
+    const _modalId = `__excel_reader_${opts.storageKey || 'default'}__`
+    document.getElementById(_modalId)?.remove()
+
     const overlay = _el('div', `position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9900;display:none;align-items:center;justify-content:center`)
+    overlay.id = _modalId
     const modal   = _el('div', `background:${T.bg};border:1px solid ${T.bd};border-radius:14px;padding:22px;width:min(700px,96vw);max-height:92vh;overflow-y:auto;position:relative;box-shadow:0 8px 32px rgba(0,0,0,.15)`)
     overlay.appendChild(modal)
     document.body.appendChild(overlay)
@@ -299,18 +340,145 @@ const ExcelUtil = (() => {
       _el('span', `font-size:11px;color:${T.mt}`, '헤더 행:'), selHdr)
     step2.appendChild(topBar)
 
-    // 컬럼 매핑 그리드 (항상 2열 고정 — 모바일에서 화면 폭에 따라 1열로 무너지는 문제 방지)
-    const colGrid    = _el('div', 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px')
+    // ── 동적 컬럼 관리 ──
+    // _dynCols: 현재 컬럼 목록 [{ _id, id, label, required, keywords }]
+    // columns(초기값)을 기반으로 시작하되 사용자가 추가/삭제/이름수정 가능
+    //
+    // 버전 관리: 앱 코드의 columns가 바뀌면 저장본을 폐기하고 새 기본값 사용
+    // (예전 저장 설정 때문에 앱 업데이트가 반영 안 되는 문제 방지)
+
+    // columns 정규화 — 항상 _id 부여
+    function _normalizeColumns(cols) {
+      return cols.map((c, i) => ({
+        _id:      c._id || `col_${i}_${c.id || c.label || i}`,
+        id:       c.id || `col_${i}`,
+        label:    c.label || `항목${i + 1}`,
+        required: !!c.required,
+        keywords: Array.isArray(c.keywords) ? c.keywords : [],
+      }))
+    }
+
+    // 기본 컬럼 구조의 시그니처 (id+label+required 조합) — 변경 감지용
+    function _columnsSignature(cols) {
+      return cols.map(c => `${c.id || ''}:${c.label || ''}:${c.required ? 1 : 0}`).join('|')
+    }
+
+    const _baseCols  = _normalizeColumns(columns)
+    const _baseSig   = _columnsSignature(columns)
+    const COL_STORAGE_KEY = `excel_cols_${opts.storageKey || 'default'}`
+
+    function _loadDynCols() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(COL_STORAGE_KEY) || 'null')
+        // 저장본이 있고, 기본 시그니처가 일치할 때만 사용
+        if (saved && saved.__baseSig === _baseSig && Array.isArray(saved.cols)) {
+          return _normalizeColumns(saved.cols)
+        }
+      } catch (e) {
+        log.warn('[ExcelUtil] 컬럼 설정 로드 실패, 기본값 사용', e)
+      }
+      return _baseCols.map(c => ({ ...c }))
+    }
+
+    function _saveDynCols(cols) {
+      try {
+        localStorage.setItem(COL_STORAGE_KEY, JSON.stringify({ __baseSig: _baseSig, cols }))
+      } catch (e) {
+        log.warn('[ExcelUtil] 컬럼 설정 저장 실패', e)
+      }
+    }
+
+    let _dynCols = _loadDynCols()
     const colSelects = {}
-    columns.forEach((col) => {
-      const wrap = _el('div', 'min-width:0')
-      const lbl  = _el('label', `display:block;font-size:11px;color:${T.mt};margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`, col.label + (col.required ? ' *' : ''))
-      const sel  = _el('select', `width:100%;padding:6px 8px;background:${T.sur};border:1px solid ${T.bd};color:${T.tx};border-radius:${T.r};font-size:12px;box-sizing:border-box`)
-      colSelects[col.id] = sel
-      sel.onchange = () => _buildPreview()
-      wrap.append(lbl, sel); colGrid.appendChild(wrap)
-    })
-    step2.appendChild(colGrid)
+
+    // 컬럼 관리 영역
+    const colMgmtWrap = _el('div', `border:1px solid ${T.bd};border-radius:${T.r};padding:10px 12px;margin-bottom:14px;box-sizing:border-box`)
+    const colMgmtHead = _el('div', 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;flex-wrap:wrap')
+    colMgmtHead.append(_el('span', `font-size:11px;color:${T.mt};font-weight:600`, '📋 컬럼 설정 (이름 수정 · 추가 · 삭제 가능)'))
+    const colBtnWrap = _el('div', 'display:flex;gap:6px')
+    const btnResetCol = _el('button', `padding:4px 10px;font-size:11px;border-radius:14px;border:1px solid ${T.bd};background:${T.bg};color:${T.mt};cursor:pointer`, '기본값 복원')
+    const btnAddCol = _el('button', `padding:4px 10px;font-size:11px;border-radius:14px;border:1px solid ${T.ac};background:${T.bg};color:${T.ac};cursor:pointer;font-weight:600`, '+ 컬럼 추가')
+    colBtnWrap.append(btnResetCol, btnAddCol)
+    colMgmtHead.appendChild(colBtnWrap)
+    colMgmtWrap.appendChild(colMgmtHead)
+
+    const colGrid = _el('div', 'display:flex;flex-direction:column;gap:8px')
+    const colEmptyMsg = _el('div', `font-size:12px;color:#dc2626;padding:4px 0`, '⚠️ 컬럼이 없습니다. 최소 1개 이상 추가하세요.')
+    colMgmtWrap.appendChild(colGrid)
+    step2.appendChild(colMgmtWrap)
+
+    function _renderColGrid() {
+      colGrid.innerHTML = ''
+      Object.keys(colSelects).forEach(k => delete colSelects[k])
+
+      if (_dynCols.length === 0) {
+        colGrid.appendChild(colEmptyMsg)
+        return
+      }
+
+      _dynCols.forEach((col, ci) => {
+        const row = _el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap')
+
+        const badge = _el('span', `font-size:10px;padding:2px 6px;border-radius:10px;flex-shrink:0;font-weight:600;${col.required ? `background:${T.ac}22;color:${T.ac}` : `background:${T.sur};color:${T.mt}`}`, col.required ? '필수' : '선택')
+
+        const nameInput = _el('input', `width:100px;padding:5px 8px;border:1px solid ${T.bd};border-radius:6px;font-size:12px;background:${T.sur};color:${T.tx};flex-shrink:0`)
+        nameInput.value       = col.label
+        nameInput.placeholder = '컬럼 이름'
+        nameInput.title       = '컬럼 이름 수정'
+        nameInput.oninput = () => {
+          _dynCols[ci].label = nameInput.value.trim() || col.label
+          _saveDynCols(_dynCols)
+          _buildColSelects()
+        }
+
+        const sel = _el('select', `flex:1;min-width:120px;max-width:200px;padding:5px 8px;background:${T.sur};border:1px solid ${T.bd};color:${T.tx};border-radius:6px;font-size:12px`)
+        colSelects[col._id] = sel
+        sel.onchange = () => _buildPreview()
+
+        // 삭제 버튼 — 필수 컬럼이라도, 필수가 1개 이상 남으면 삭제 허용은 안 함(필수는 항상 보존)
+        const btnDel = _el('button', `padding:4px 8px;border:none;border-radius:6px;background:#fee2e2;color:#dc2626;cursor:pointer;font-size:12px;flex-shrink:0${col.required ? ';display:none' : ''}`, '삭제')
+        btnDel.onclick = () => {
+          // 컬럼이 1개뿐이면 삭제 금지
+          if (_dynCols.length <= 1) {
+            _notify('최소 1개 컬럼은 있어야 합니다.', 'warning')
+            return
+          }
+          _dynCols.splice(ci, 1)
+          _saveDynCols(_dynCols)
+          _renderColGrid()
+          _buildColSelects()
+          _buildPreview()
+        }
+
+        row.append(badge, nameInput, sel, btnDel)
+        colGrid.appendChild(row)
+      })
+    }
+
+    btnAddCol.onclick = () => {
+      const n = Date.now()
+      _dynCols.push({
+        _id:      `col_custom_${n}`,
+        id:       `custom_${n}`,
+        label:    `항목${_dynCols.length + 1}`,
+        required: false,
+        keywords: []
+      })
+      _saveDynCols(_dynCols)
+      _renderColGrid()
+      _buildColSelects()
+    }
+
+    btnResetCol.onclick = () => {
+      if (!confirm('컬럼 설정을 기본값으로 되돌릴까요? 추가/수정한 컬럼이 사라집니다.')) return
+      try { localStorage.removeItem(COL_STORAGE_KEY) } catch {}
+      _dynCols = _baseCols.map(c => ({ ...c }))
+      _renderColGrid()
+      _buildColSelects()
+      _notify('컬럼 설정이 기본값으로 복원되었습니다.', 'success')
+    }
+
+    _renderColGrid()
 
     // ── 필터 (여러 컬럼 동시 적용, AND 조건) ──
     const filterWrap   = _el('div', `border:1px solid ${T.bd};border-radius:${T.r};padding:10px 12px;margin-bottom:14px;box-sizing:border-box;overflow:hidden`)
@@ -435,18 +603,31 @@ const ExcelUtil = (() => {
     function _goStep1() { step1.style.display=''; step2.style.display='none'; _wb=null; fileInput.value='' }
 
     async function _loadFile(file) {
+      // 파일 검증
+      const valid = _validateFile(file)
+      if (!valid.ok) {
+        _notify(valid.error, 'error')
+        return
+      }
+
       await loadSheetJS()
       fileInfo.textContent = `불러오는 중... ${file.name}`
       step1.style.display = 'none'; step2.style.display = ''
       try {
         const buffer = await file.arrayBuffer()
         _wb = _xlsx().read(buffer, { type:'array', cellDates:true })
+
+        if (!_wb.SheetNames || _wb.SheetNames.length === 0) {
+          throw new Error('읽을 수 있는 시트가 없습니다.')
+        }
+
         selSheet.innerHTML = _wb.SheetNames.map((n,i) => `<option value="${i}">${_esc(n)}</option>`).join('')
         _sheetIdx = 0; _parseSheet()
         fileInfo.textContent = `📊 ${file.name}`
       } catch(e) {
         fileInfo.textContent = `❌ 읽기 실패: ${e.message}`
         log.error('[ExcelUtil] 파일 읽기 실패', e)
+        _notify(`파일을 읽을 수 없습니다: ${e.message}`, 'error')
       }
     }
 
@@ -466,21 +647,42 @@ const ExcelUtil = (() => {
 
       _headers = (raw2d[hRow] || []).map(h => String(h).trim())
       _rows2d  = raw2d.slice(hRow + 1).filter(r => r.some(c => String(c).trim()))
-      fileInfo.textContent = `📊 ${_wb.SheetNames[_sheetIdx]} · ${_rows2d.length}행 · ${_headers.length}컬럼`
+
+      // 빈 시트 / 헤더가 전부 빈 경우 안내
+      if (_headers.length === 0 || _headers.every(h => !h)) {
+        fileInfo.textContent = `⚠️ ${_wb.SheetNames[_sheetIdx]} · 헤더를 찾을 수 없습니다. 헤더 행을 조정해보세요`
+        _notify('헤더를 인식하지 못했습니다. 상단의 "헤더 행"을 바꿔보세요.', 'warning')
+      } else if (_rows2d.length === 0) {
+        fileInfo.textContent = `⚠️ ${_wb.SheetNames[_sheetIdx]} · 데이터 행이 없습니다`
+        _notify('데이터 행이 없습니다. 시트나 헤더 행을 확인하세요.', 'warning')
+      } else {
+        fileInfo.textContent = `📊 ${_wb.SheetNames[_sheetIdx]} · ${_rows2d.length}행 · ${_headers.length}컬럼`
+      }
       _buildColSelects()
     }
 
     function _buildColSelects() {
       const noneOpt    = '<option value="">-- 미사용 --</option>'
       const headerOpts = _headers.map((h,i) => `<option value="${i}">${_esc(h) || '(컬럼'+(i+1)+')'}</option>`).join('')
-      columns.forEach(col => {
-        const sel = colSelects[col.id]
+
+      _dynCols.forEach(col => {
+        const key = col._id
+        const sel = colSelects[key]
+        if (!sel) return
         sel.innerHTML = (col.required ? '' : noneOpt) + headerOpts
-        if (col.keywords) {
+
+        // 키워드 기반 자동 매핑
+        if (col.keywords && col.keywords.length > 0) {
           const found = _headers.findIndex(h => col.keywords.some(kw => h.toLowerCase().includes(kw.toLowerCase())))
+          if (found >= 0) { sel.value = String(found); return }
+        }
+        // 라벨명 기반 자동 매핑 (키워드 없을 때)
+        if (col.label) {
+          const found = _headers.findIndex(h => h.toLowerCase().includes(col.label.toLowerCase()))
           if (found >= 0) sel.value = String(found)
         }
       })
+
       _resetFilters()
       _buildPreview()
     }
@@ -505,32 +707,42 @@ const ExcelUtil = (() => {
       prevTbl.innerHTML = ''
       const filteredRows = _getFilteredRows()
 
+      // selMap: { colIdx: { label, color } } - dynCols 기반
       const selMap = {}
-      columns.forEach((col, ci) => {
-        const v = colSelects[col.id]?.value
-        if (v !== '' && v !== undefined) selMap[+v] = { label:col.label, color:PALETTE[ci] || PALETTE[0] }
+      _dynCols.forEach((col, ci) => {
+        const key = col._id
+        const v   = colSelects[key]?.value
+        if (v !== '' && v !== undefined) selMap[+v] = { label: col.label, color: PALETTE[ci % PALETTE.length] }
       })
 
       function _onColClick(colIdx, e) {
         document.querySelectorAll('.__er-menu').forEach(m => m.remove())
-        const menu = _el('div', `position:fixed;z-index:9999;background:${T.bg};border:1px solid ${T.bd};border-radius:${T.r};box-shadow:0 4px 20px rgba(0,0,0,.12);padding:6px;min-width:150px;font-size:12px`)
+        const menu = _el('div', `position:fixed;z-index:9999;background:${T.bg};border:1px solid ${T.bd};border-radius:${T.r};box-shadow:0 4px 20px rgba(0,0,0,.12);padding:6px;min-width:160px;font-size:12px`)
         menu.classList.add('__er-menu')
-        menu.style.left = Math.min(e.clientX, window.innerWidth-170) + 'px'
+        menu.style.left = Math.min(e.clientX, window.innerWidth-180) + 'px'
         menu.style.top  = Math.min(e.clientY+4, window.innerHeight-200) + 'px'
-        ;[...columns.map(col => ({ label: col.label + ' 지정', id: col.id })), { label:'— 선택 해제', id:'none' }]
+
+        // dynCols 기반 메뉴 생성
+        ;[..._dynCols.map(col => ({ label: col.label + ' 지정', key: col._id })), { label: '— 선택 해제', key: 'none' }]
           .forEach(opt => {
             const btn = _el('button', `display:block;width:100%;text-align:left;padding:6px 10px;background:none;border:none;color:${T.tx};cursor:pointer;border-radius:5px`, opt.label)
             btn.onmouseenter = () => { btn.style.background = T.sur }
             btn.onmouseleave = () => { btn.style.background = 'none' }
             btn.onclick = () => {
-              if (opt.id === 'none') { columns.forEach(col => { const s=colSelects[col.id]; if(s&&+s.value===colIdx)s.value='' }) }
-              else if (colSelects[opt.id]) colSelects[opt.id].value = String(colIdx)
+              if (opt.key === 'none') {
+                _dynCols.forEach(col => {
+                  const s = colSelects[col._id]
+                  if (s && +s.value === colIdx) s.value = ''
+                })
+              } else if (colSelects[opt.key]) {
+                colSelects[opt.key].value = String(colIdx)
+              }
               menu.remove(); _buildPreview()
             }
             menu.appendChild(btn)
           })
         document.body.appendChild(menu)
-        setTimeout(() => document.addEventListener('click', () => menu.remove(), { once:true }), 0)
+        setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0)
       }
 
       // 컬럼 번호 행
@@ -547,7 +759,7 @@ const ExcelUtil = (() => {
       _headers.forEach((h, i) => {
         const info = selMap[i]
         const th   = document.createElement('th')
-        th.innerHTML = `${_esc(h)||'(없음)'}${info?`<br><span style="font-size:9px;color:${T.ac}">[${info.label}]</span>`:''}`
+        th.innerHTML = `${_esc(h)||'(없음)'}${info ? `<br><span style="font-size:9px;color:${T.ac}">[${info.label}]</span>` : ''}`
         th.style.cssText = `padding:5px 8px;font-size:11px;color:${T.mt};white-space:nowrap;border:1px solid ${T.bd2};cursor:pointer;background:${info?.color||T.sur};font-weight:600;text-align:left`
         th.title = '클릭하여 컬럼 지정'; th.onclick = ev => _onColClick(i, ev)
         hRow.appendChild(th)
@@ -580,17 +792,42 @@ const ExcelUtil = (() => {
     }
 
     function _confirm() {
-      for (const col of columns) {
-        if (col.required && (!colSelects[col.id] || colSelects[col.id].value === '')) {
-          alert(`'${col.label}' 컬럼을 선택하세요.`); return
+      // 컬럼이 하나도 없으면 차단
+      if (_dynCols.length === 0) {
+        _notify('컬럼을 최소 1개 이상 설정하세요.', 'error')
+        return
+      }
+
+      // 필수 컬럼 검증 (dynCols 기반)
+      for (const col of _dynCols) {
+        if (col.required) {
+          const key = col._id
+          if (!colSelects[key] || colSelects[key].value === '') {
+            _notify(`'${col.label}' 컬럼을 선택하세요.`, 'error')
+            return
+          }
         }
       }
-      const mapping = {}
-      columns.forEach(col => {
-        const v = colSelects[col.id]?.value
-        mapping[col.id] = (v !== '' && v !== undefined) ? +v : null
-      })
+
+      // 데이터가 없으면 차단
       const filteredRows = _getFilteredRows()
+      if (!filteredRows || filteredRows.length === 0) {
+        _notify('선택된 데이터가 없습니다. 필터 조건을 확인하세요.', 'error')
+        return
+      }
+
+      // mapping: { colKey: colIndex | null, _labels, _dynCols }
+      const mapping  = {}
+      const _labels  = {}
+      _dynCols.forEach(col => {
+        const key = col._id
+        const v   = colSelects[key]?.value
+        mapping[key]  = (v !== '' && v !== undefined) ? +v : null
+        _labels[key]  = col.label
+      })
+      mapping._labels   = _labels
+      mapping._dynCols  = _dynCols.map(c => ({ ...c }))
+
       hide()
       onConfirm(_headers, filteredRows, mapping)
       log.debug(`[ExcelUtil] createReader confirm`, mapping, `필터: ${filteredRows.length}/${_rows2d.length}행`)
