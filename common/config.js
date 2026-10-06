@@ -15,7 +15,7 @@
 (function (g) {
   'use strict';
   var CONFIG = {
-    VERSION: '2026-10-05',
+    VERSION: '2026-10-06',
 
     // 카카오 지도 (JS 키) — 웹 플랫폼 도메인: rcntiger.github.io
     KAKAO_JS_KEY: 'a5e543d870953c97c0775ff90846c81b',
@@ -26,6 +26,12 @@
       hydrant: {
         url: 'https://uxbbzvvkpebdvdjobnyz.supabase.co',
         anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4YmJ6dnZrcGViZHZkam9ibnl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTIzNTQsImV4cCI6MjA4OTU4ODM1NH0.PvCMpxSv-B3woWKfjxEkoyv1gDdjEHZy3_lvWVrSz2E'
+      }
+,
+      // 현장 확인 점검 지도 (inspecMap)
+      inspec: {
+        url: 'https://dsootbcqnifiqyajivrx.supabase.co',
+        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRzb290YmNxbmlmaXF5YWppdnJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjYwMzcsImV4cCI6MjA5MTYwMjAzN30.f3b4dkWnYz02yQzsuljD3PuEq9LO7tvzzt1k_Ko9uHs'
       }
       // 다른 앱을 옮길 때 여기에 추가: 예) coffee: { url: '...', anonKey: '...' }
     },

@@ -14,6 +14,7 @@
      const a = await KakaoUtil.reverseGeocode(37.46, 126.90);   // {road, jibun}
      const p = await KakaoUtil.geocode('서울 금천구 시흥대로 73길 70'); // {lat,lng} | null
      const list = await KakaoUtil.keywordSearch('금천구청', 10);  // [{name,addr,lat,lng}]
+     const docs = await KakaoUtil.keywordSearchRaw('금천구청', 10); // 카카오 원본 결과(REST documents와 같은 필드)
 
    다른 common 모듈을 참조하지 않는다. 키는 init에서 넘겨받는다(config.js를 직접 읽지 않음).
    ═══════════════════════════════════════════════════════════════════════ */
@@ -89,6 +90,14 @@
       });
     });
   }
+  // 카카오 원본 결과 그대로 (REST API의 documents와 같은 필드: x, y, address_name, place_name, road_address ...)
+  // 기존 REST 호출 코드를 최소 수정으로 옮길 때 사용
+  function addressSearchRaw(q, size) {
+    return call(function (cb) { geo().addressSearch(q, cb, { size: size || 10 }); });
+  }
+  function keywordSearchRaw(q, size) {
+    return call(function (cb) { plc().keywordSearch(q, cb, { size: Math.min(size || 10, 15) }); });
+  }
   // 주소 → 좌표 (주소 검색 → 실패 시 키워드 검색). 없으면 null
   function geocode(q) {
     return addressSearch(q, 1).then(function (a) {
@@ -100,7 +109,8 @@
   var KakaoUtil = {
     init: init, load: load, preload: preload,
     reverseGeocode: reverseGeocode, addressSearch: addressSearch,
-    keywordSearch: keywordSearch, geocode: geocode
+    keywordSearch: keywordSearch, geocode: geocode,
+    addressSearchRaw: addressSearchRaw, keywordSearchRaw: keywordSearchRaw
   };
   g.KakaoUtil = KakaoUtil;
 })(window);
