@@ -11,6 +11,11 @@
  *   </script>
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 KakaoUtil가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.KakaoUtil) return
+
 const KakaoUtil = (() => {
   const log = window.Logger || { debug: console.log, warn: console.warn, error: console.error }
 
@@ -18,7 +23,9 @@ const KakaoUtil = (() => {
     if (!window.kakao?.maps) throw new Error('[KakaoUtil] Kakao Maps SDK가 로드되지 않았습니다. SDK 스크립트를 먼저 로드하세요.')
   }
 
-  const kakao = () => { _checkSDK(); return window.kakao.maps }
+  // kakao.maps를 돌려주는 도우미. 생성자로 쓸 때는 반드시 new (K()).Map(...) 처럼 괄호로 감싼다.
+  // (예전엔 new kakao().Map(...)로 써서 'kakao is not a constructor' 오류로 모든 기능이 동작하지 않았음 — 2026-10-23 수정)
+  const K = () => { _checkSDK(); return window.kakao.maps }
 
   // ────────────────────────────────────────────
   // 지도 초기화
@@ -28,22 +35,22 @@ const KakaoUtil = (() => {
    * 지도 생성
    * @param {string} containerId - div id
    * @param {object} options
-   *   lat, lng: 중심 좌표 (기본: 금천소방서)
+   *   lat, lng: 중심 좌표 (기본: 금천소방서 — 시흥대로 342)
    *   level: 줌 레벨 (기본 5)
    * @returns kakao.maps.Map
    */
   function initMap(containerId, options = {}) {
     const {
-      lat   = 37.4563,
-      lng   = 126.8955,
+      lat   = 37.4647,
+      lng   = 126.9015,
       level = 5
     } = options
 
     const container = document.getElementById(containerId)
     if (!container) throw new Error(`[KakaoUtil] #${containerId} 엘리먼트를 찾을 수 없습니다.`)
 
-    const map = new kakao().Map(container, {
-      center: new kakao().LatLng(lat, lng),
+    const map = new (K()).Map(container, {
+      center: new (K()).LatLng(lat, lng),
       level
     })
     return map
@@ -81,22 +88,22 @@ const KakaoUtil = (() => {
       onClick
     } = options
 
-    const position = new kakao().LatLng(lat, lng)
+    const position = new (K()).LatLng(lat, lng)
     const markerOptions = { map, position, title }
 
     const url = imageUrl || MARKER_COLORS[color]
     if (url) {
-      markerOptions.image = new kakao().MarkerImage(
+      markerOptions.image = new (K()).MarkerImage(
         url,
-        new kakao().Size(...imageSize),
-        { offset: new kakao().Point(imageSize[0] / 2, imageSize[1]) }
+        new (K()).Size(...imageSize),
+        { offset: new (K()).Point(imageSize[0] / 2, imageSize[1]) }
       )
     }
 
-    const marker = new kakao().Marker(markerOptions)
+    const marker = new (K()).Marker(markerOptions)
 
     if (onClick) {
-      kakao().event.addListener(marker, 'click', () => onClick(marker))
+      K().event.addListener(marker, 'click', () => onClick(marker))
     }
 
     return marker
@@ -122,7 +129,7 @@ const KakaoUtil = (() => {
    * @returns MarkerClusterer
    */
   function createClusterer(map, markers = [], options = {}) {
-    const clusterer = new kakao().MarkerClusterer({
+    const clusterer = new (K()).MarkerClusterer({
       map,
       markers,
       gridSize:          options.gridSize          ?? 60,
@@ -157,7 +164,7 @@ const KakaoUtil = (() => {
   function openInfoWindow(map, marker, content, closeOthers = true) {
     if (closeOthers && _activeInfoWindow) _activeInfoWindow.close()
 
-    const iw = new kakao().InfoWindow({
+    const iw = new (K()).InfoWindow({
       content,
       removable: true,
     })
@@ -183,8 +190,8 @@ const KakaoUtil = (() => {
    * @param {string} position - 'TOPRIGHT'|'TOPLEFT'|'BOTTOMRIGHT' 등
    */
   function addMapTypeControl(map, position = 'TOPRIGHT') {
-    const ctrl = new kakao().MapTypeControl()
-    map.addControl(ctrl, kakao().ControlPosition[position])
+    const ctrl = new (K()).MapTypeControl()
+    map.addControl(ctrl, K().ControlPosition[position])
     return ctrl
   }
 
@@ -192,8 +199,8 @@ const KakaoUtil = (() => {
    * 줌 컨트롤 추가
    */
   function addZoomControl(map, position = 'RIGHT') {
-    const ctrl = new kakao().ZoomControl()
-    map.addControl(ctrl, kakao().ControlPosition[position])
+    const ctrl = new (K()).ZoomControl()
+    map.addControl(ctrl, K().ControlPosition[position])
     return ctrl
   }
 
@@ -205,13 +212,14 @@ const KakaoUtil = (() => {
    */
   function initRoadview(map, containerId) {
     const container   = document.getElementById(containerId)
-    const roadview    = new kakao().Roadview(container)
-    const rvClient    = new kakao().RoadviewClient()
+    const roadview    = new (K()).Roadview(container)
+    const rvClient    = new (K()).RoadviewClient()
 
     function moveTo(lat, lng) {
-      const pos = new kakao().LatLng(lat, lng)
+      const pos = new (K()).LatLng(lat, lng)
       rvClient.getNearestPanoId(pos, 50, panoId => {
-        roadview.setPanoId(panoId, pos)
+        if (panoId) roadview.setPanoId(panoId, pos)
+        else log.warn('[KakaoUtil] 근처에 로드뷰가 없습니다:', lat, lng)
       })
     }
 
@@ -222,11 +230,6 @@ const KakaoUtil = (() => {
   // 거리 측정 폴리라인
   // ────────────────────────────────────────────
 
-  let _distanceLine   = null
-  let _distanceDots   = []
-  let _distanceTotal  = 0
-  let _distanceActive = false
-
   /**
    * 거리 측정 모드 시작/종료 토글
    * @param {kakao.maps.Map} map
@@ -234,12 +237,14 @@ const KakaoUtil = (() => {
    * @returns { start, stop, reset }
    */
   function distanceMeasure(map, onUpdate) {
+    // 상태를 이 함수 안에 둔다 (예전엔 모듈 전체가 하나를 같이 써서 지도가 둘이면 섞였음)
+    let _distanceLine = null, _distanceDots = [], _distanceTotal = 0, _distanceActive = false
     let clickListener, moveListener
 
     function start() {
       if (_distanceActive) return
       _distanceActive = true
-      _distanceLine = new kakao().Polyline({
+      _distanceLine = new (K()).Polyline({
         map,
         strokeWeight: 3,
         strokeColor:  '#db4040',
@@ -247,19 +252,19 @@ const KakaoUtil = (() => {
         strokeStyle: 'solid'
       })
 
-      clickListener = kakao().event.addListener(map, 'click', e => {
+      clickListener = K().event.addListener(map, 'click', e => {
         const path = _distanceLine.getPath()
         path.push(e.latLng)
         _distanceLine.setPath(path)
         _distanceTotal = _distanceLine.getLength()
         if (onUpdate) onUpdate(_distanceTotal)
 
-        const dot = new kakao().Marker({
+        const dot = new (K()).Marker({
           map,
           position: e.latLng,
-          image: new kakao().MarkerImage(
+          image: new (K()).MarkerImage(
             'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/redballs.png',
-            new kakao().Size(10, 10)
+            new (K()).Size(10, 10)
           )
         })
         _distanceDots.push(dot)
@@ -269,8 +274,8 @@ const KakaoUtil = (() => {
     function stop() {
       if (!_distanceActive) return
       _distanceActive = false
-      if (clickListener) kakao().event.removeListener(clickListener)
-      if (moveListener)  kakao().event.removeListener(moveListener)
+      if (clickListener) K().event.removeListener(clickListener)
+      if (moveListener)  K().event.removeListener(moveListener)
     }
 
     function reset() {
@@ -304,7 +309,7 @@ const KakaoUtil = (() => {
       navigator.geolocation.getCurrentPosition(pos => {
         const lat = pos.coords.latitude
         const lng = pos.coords.longitude
-        const latlng = new kakao().LatLng(lat, lng)
+        const latlng = new (K()).LatLng(lat, lng)
         map.setCenter(latlng)
         map.setLevel(level)
         if (marker) {
@@ -327,9 +332,9 @@ const KakaoUtil = (() => {
    */
   function coordToAddress(lat, lng) {
     return new Promise((resolve, reject) => {
-      const geocoder = new kakao().services.Geocoder()
+      const geocoder = new (K()).services.Geocoder()
       geocoder.coord2Address(lng, lat, (result, status) => {
-        if (status !== kakao().services.Status.OK) return reject(new Error('주소 변환 실패'))
+        if (status !== K().services.Status.OK) return reject(new Error('주소 변환 실패'))
         const r = result[0]
         resolve({
           road:  r.road_address ? r.road_address.address_name  : '',
@@ -346,9 +351,9 @@ const KakaoUtil = (() => {
    */
   function addressToCoord(address) {
     return new Promise((resolve, reject) => {
-      const geocoder = new kakao().services.Geocoder()
+      const geocoder = new (K()).services.Geocoder()
       geocoder.addressSearch(address, (result, status) => {
-        if (status !== kakao().services.Status.OK) return reject(new Error('좌표 변환 실패'))
+        if (status !== K().services.Status.OK) return reject(new Error('좌표 변환 실패'))
         resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) })
       })
     })
@@ -363,9 +368,10 @@ const KakaoUtil = (() => {
    * @param {string} storageKey - 기본 'kakao_stations'
    */
   function createStationManager(storageKey = 'kakao_stations') {
+    // 좌표는 도로명 주소로 확인한 값 (이름으로 검색하면 엉뚱한 곳이 잡혀 주소로 고정 — field-check와 같은 값)
     const DEFAULT_STATIONS = [
-      { id: 's1', name: '금천소방서',       lat: 37.4563, lng: 126.8955 },
-      { id: 's2', name: '시흥119안전센터',   lat: 37.4280, lng: 126.8730 },
+      { id: 's1', name: '금천소방서',     addr: '서울 금천구 시흥대로 342',    lat: 37.4647, lng: 126.9015 },
+      { id: 's2', name: '시흥119안전센터', addr: '서울 금천구 시흥대로45길 31', lat: 37.4447, lng: 126.9089 },
     ]
 
     function load() {
@@ -375,7 +381,8 @@ const KakaoUtil = (() => {
     }
 
     function save(stations) {
-      localStorage.setItem(storageKey, JSON.stringify(stations))
+      try { localStorage.setItem(storageKey, JSON.stringify(stations)) }
+      catch (e) { log.warn('[KakaoUtil] 출발지 저장 실패:', e) }
     }
 
     function add(station) {
@@ -433,10 +440,17 @@ const KakaoUtil = (() => {
       const el = document.createElement('a')
       el.href = naviUrl
       el.style.display = 'none'
+      // 카카오맵 앱이 열려 화면이 숨겨지면 웹 대체 열기를 취소 (예전엔 앱과 웹이 둘 다 열렸음)
+      let appOpened = false
+      const onHide = () => { if (document.hidden) appOpened = true }
+      document.addEventListener('visibilitychange', onHide)
       document.body.appendChild(el)
       el.click()
       document.body.removeChild(el)
-      setTimeout(() => window.open(webUrl, '_blank'), 1500)
+      setTimeout(() => {
+        document.removeEventListener('visibilitychange', onHide)
+        if (!appOpened && !document.hidden) window.open(webUrl, '_blank')
+      }, 1500)
     } else {
       window.open(webUrl, '_blank')
     }
@@ -461,4 +475,5 @@ const KakaoUtil = (() => {
   }
 })()
 
-window.KakaoUtil = KakaoUtil
+g.KakaoUtil = KakaoUtil
+})(window)

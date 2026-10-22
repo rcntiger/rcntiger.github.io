@@ -11,6 +11,11 @@
  *   </script>
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 TelegramUtil가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.TelegramUtil) return
+
 const TelegramUtil = (() => {
   let _token  = null
   let _chatId = null
@@ -145,4 +150,5 @@ const TelegramUtil = (() => {
   return { init, send, sendPhoto, sendTable, sendGolfAlert, sendReserveAlert, sendKospiAlert }
 })()
 
-window.TelegramUtil = TelegramUtil
+g.TelegramUtil = TelegramUtil
+})(window)

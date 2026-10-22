@@ -21,6 +21,7 @@
    ═══════════════════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
+  if (g.KakaoGeo) return;   // 두 번 불러와도 처음 것을 그대로 쓴다 (2026-10-23)
   var opts = { jsKey: null, libraries: ['services'], timeoutMs: 10000 };
   var sdkPromise = null, geocoder = null, places = null;
 

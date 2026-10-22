@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>공통 모듈 점검</title>
+<style>
+  :root { --bg:#ffffff; --tx:#1a2233; --mt:#6b7280; --ok:#15803d; --ng:#b91c1c; --bd:#e5e7eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --tx:#e6edf3; --mt:#8b949e; --ok:#3fb950; --ng:#f85149; --bd:#30363d; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--tx); font:14px/1.6 system-ui,-apple-system,"Malgun Gothic",sans-serif; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.note { color:var(--mt); margin:0 0 14px; font-size:13px; }
+  #sum { font-weight:700; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; margin-bottom:12px; }
+  #log div { padding:3px 0; border-bottom:1px solid var(--bd); word-break:break-all; }
+  .ng { color:var(--ng); } .okk { color:var(--ok); }
+  #stage { display:none; }
+</style>
+</head>
+<body>
+<h1>공통 모듈 점검</h1>
+<p class="note">common/ 파일을 고친 뒤 이 페이지를 열어 모두 ✅인지 확인하세요. 카카오·Supabase는 가짜 객체로 시험하므로 실제 데이터는 건드리지 않습니다.</p>
+<div id="sum">시험 중...</div>
+<div id="log"></div>
+<div id="stage"><div id="map"></div><div id="tb"></div><div id="rv"></div></div>
+<script>
+let pass = 0, fail = 0
+const ok = (cond, name, extra) => {
+  cond ? pass++ : fail++
+  const d = document.createElement('div'); d.className = cond ? 'okk' : 'ng'
+  d.textContent = (cond ? '✅ ' : '❌ ') + name + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')
+  document.getElementById('log').appendChild(d)
+}
+function done() {
+  const s = document.getElementById('sum')
+  s.textContent = fail ? `❌ ${fail}개 실패 / ${pass}개 통과` : `✅ 모두 통과 (${pass}개)`
+  s.className = fail ? 'ng' : 'okk'
+}
+window.alert = () => {}; window.confirm = () => true; window.prompt = () => ''
+// ── 가짜 카카오 지도 ──
+const made = []
+function Cls(name) { return function (...a) { made.push(name); this._n = name; this.args = a; this.setMap = () => {}; this.getPath = () => (this._p ||= []); this.setPath = p => { this._p = p }; this.getLength = () => 123; this.open = () => {}; this.close = () => {}; this.setPanoId = () => {} } }
+const maps = {}
+;['Map','LatLng','MarkerImage','Size','Point','Marker','MarkerClusterer','InfoWindow','MapTypeControl','ZoomControl','Roadview','Polyline','CustomOverlay'].forEach(n => maps[n] = Cls(n))
+maps.Map = function (c, o) { made.push('Map'); this.c = c; this.o = o; this.getNode = () => c; this.addControl = () => {}; this.setMapTypeId = () => {}; this.setCenter = () => {}; this.setLevel = () => {} }
+maps.RoadviewClient = function () { this.getNearestPanoId = (p, r, cb) => cb(null) }
+maps.ControlPosition = { TOPRIGHT: 1, RIGHT: 2 }
+maps.MapTypeId = { HYBRID: 1, ROADMAP: 2 }
+const listeners = []
+maps.event = { addListener: (t, e, f) => { const l = { t, e, f }; listeners.push(l); return l }, removeListener: l => { const i = listeners.indexOf(l); if (i >= 0) listeners.splice(i, 1) } }
+maps.services = { Status: { OK: 'OK' }, Geocoder: function () {}, Places: function () {} }
+window.kakao = { maps }
+
+// ── 가짜 Supabase ── (rows 2500개 표 하나, 쿼리 기록)
+const TOTAL = 2500, calls = []
+window.supabase = { createClient: () => ({
+  from(table) {
+    const q = { table, ops: [] }
+    const b = {
+      select(c, o) { q.ops.push(['select', c, o]); return b }, eq(k, v) { q.ops.push(['eq', k, v]); return b }, neq(k, v) { q.ops.push(['neq', k, v]); return b },
+      order(c, o) { q.ops.push(['order', c, o?.ascending]); return b }, limit(n) { q.ops.push(['limit', n]); return b },
+      update(p) { q.ops.push(['update', p]); return b }, delete() { q.ops.push(['delete']); return b }, insert(p) { q.ops.push(['insert']); return b }, upsert(p) { q.ops.push(['upsert']); return b },
+      range(a, z) { q.ops.push(['range', a, z]); calls.push(q); const rows = []; for (let i = a; i <= Math.min(z, TOTAL - 1); i++) rows.push({ id: i }); return Promise.resolve({ data: rows, error: null }) },
+      then(res, rej) { calls.push(q); return Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => ({ id: i })), error: null }).then(res, rej) },
+    }
+    return b
+  },
+  storage: { from: () => ({}) },
+}) }
+
+
+const T = Date.now()
+document.write('<script src="logger.js?t=' + T + '"><\/script>' + '<script src="utils.js?t=' + T + '"><\/script>' + '<script src="supabase.js?t=' + T + '"><\/script>' + '<script src="telegram.js?t=' + T + '"><\/script>' + '<script src="keys.js?t=' + T + '"><\/script>' + '<script src="kakao-geo.js?t=' + T + '"><\/script>' + '<script src="kakao.js?t=' + T + '"><\/script>' + '<script src="icon.js?t=' + T + '"><\/script>' + '<script src="kakao-ui.js?t=' + T + '"><\/script>' + '<script src="excel.js?t=' + T + '"><\/script>' + '<script src="config.js?t=' + T + '"><\/script>')
+</script>
+<script>
+for (const g of ['Logger','Utils','SupabaseUtil','TelegramUtil','APP_KEYS','KakaoGeo','KakaoUtil','IconUtil','KakaoUI','ExcelUtil','ConfigUtil'])
+  ok(typeof window[g] === 'object' && window[g] !== null, `전역 ${g} 존재`)
+const XLSX_ = () => window.XLSX
+;(async () => {
+  const U = window.Utils
+  // ── utils ──
+  ok(U.formatDate(new Date(2026, 9, 23, 7, 30)) === '2026-10-23', 'formatDate: 새벽 07:30도 그날 날짜 (예전엔 전날)', U.formatDate(new Date(2026, 9, 23, 7, 30)))
+  const n = new Date(), p = x => String(x).padStart(2, '0')
+  ok(U.today() === `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`, 'today = 기기 시간대 날짜', U.today())
+  ok(U.formatDate('2026-03-05') === '2026-03-05', "formatDate('YYYY-MM-DD') 그대로")
+  ok(U.formatDate('엉뚱한값') === '', 'formatDate 잘못된 값 → 빈 문자열')
+  ok(U.esc(`<img src=x onerror="a('b')">&`) === '&lt;img src=x onerror=&quot;a(&#39;b&#39;)&quot;&gt;&amp;', 'esc 특수문자 5종')
+  ok(U.dday(U.today()).label === 'D-Day', 'dday 오늘 = D-Day')
+  U.lsSet('k', { a: 1 }, 't_'); ok(U.lsGet('k', null, 't_')?.a === 1, 'lsSet/lsGet')
+
+  // ── supabase ──
+  const S = window.SupabaseUtil
+  S.init('https://x.supabase.co', 'key')
+  calls.length = 0
+  const all = await S.selectAll('hydmap_items', { eq: { inspection_id: 7 }, order: { column: 'created_at' } })
+  ok(all.length === 2500 && calls.length === 3, 'selectAll: 2500행을 1000씩 3번에 다 받음', { rows: all.length, pages: calls.length })
+  const ops = calls[0].ops.map(o => o[0] + (o[1] ? ':' + o[1] : '')).join(',')
+  ok(/order:created_at,order:id/.test(ops), 'selectAll: 정렬 + 고정 키(id) 순서', ops)
+  const one = await S.select('hydmap_items', {}); ok(one.length === 1000, 'select(기존) 동작 그대로 (1000행)')
+  let threw = null; try { await S.remove('t', {}) } catch (e) { threw = e.message }
+  ok(threw && threw.includes('조건'), 'remove 빈 조건 → 막힘', threw)
+  threw = null; try { await S.update('t', { a: 1 }) } catch (e) { threw = e.message }
+  ok(!!threw, 'update 조건 없음 → 막힘')
+  threw = null; try { await S.remove('t', { id: 3 }) } catch (e) { threw = e.message }
+  ok(!threw, 'remove 정상 조건 → 통과')
+
+  // ── kakao ──
+  const KU = window.KakaoUtil
+  let e1 = null, map
+  try { map = KU.initMap('map'); KU.addMarker(map, { lat: 1, lng: 2, onClick: () => {} }); KU.createClusterer(map, []); KU.openInfoWindow(map, {}, 'x'); KU.addZoomControl(map); KU.initRoadview(map, 'rv').moveTo(1, 2) } catch (e) { e1 = e.message }
+  ok(!e1, 'KakaoUtil 지도·마커·클러스터·인포윈도우·로드뷰 (예전엔 not a constructor)', e1 || made.slice(0, 6))
+  ok(map?.o?.center?.args?.[0] === 37.4647, '기본 중심 = 금천소방서 주소 좌표', map?.o?.center?.args)
+  const d1 = KU.distanceMeasure(map, () => {}), d2 = KU.distanceMeasure(map, () => {})
+  d1.start(); d2.start(); ok(listeners.filter(l => l.t === map && l.e === 'click').length === 2, '거리재기: 지도별로 따로 동작 (예전엔 두 번째가 무시됨)')
+  d1.reset(); d2.reset()
+  const st = KU.createStationManager('t_st').load()
+  ok(st[1].lat === 37.4447 && st[1].addr.includes('45길'), '기본 출발지 시흥119 = 주소 좌표', st[1])
+
+  // ── kakao-ui: 출발지 이름 이스케이프 ──
+  KU.createStationManager('t_xss').save([{ id: 'a', name: '<img src=x onerror=alert(1)>', lat: 1, lng: 2 }])
+  let e2 = null
+  try { window.KakaoUI.createToolbar(map, '#tb', { station: { storageKey: 't_xss' }, location: false }) } catch (e) { e2 = e.message }
+  ok(!e2, 'KakaoUI 툴바 생성', e2)
+  window.document.querySelector('#tb button[title="출발지"]').click()
+  const panel = window.document.querySelector('.kui-panel')
+  ok(panel && !panel.querySelector('img') && panel.innerHTML.includes('&lt;img'), 'KakaoUI 출발지 이름 이스케이프 (태그 실행 안 됨)')
+
+  // ── icon: 이름 이스케이프 ──
+  window.IconUtil.addByUrl('https://x/a.png', { name: '"><img src=x onerror=alert(1)>' })
+  const box = window.document.createElement('div'); window.IconUtil.renderPicker(box, {})
+  ok(box.querySelectorAll('img').length === window.IconUtil.getList().length, 'IconUtil 이름에 태그를 넣어도 이미지가 더 생기지 않음')
+
+  // ── excel: 병합셀 ──
+  await window.ExcelUtil.loadSheetJS()
+  // 헤더 / A동(구역 '1구역' 3행 병합, 비고 '누수') / B동(비고 빈칸) / C동(비고 빈칸, 위도 빈칸)
+  const aoa = [['이름', '구역', '비고', '위도'], ['A동', '1구역', '누수', 37.1], ['B동', '', '', 37.2], ['C동', '', '', ''], ['D동', '2구역', '', 37.4]]
+  const ws = XLSX_().utils.aoa_to_sheet(aoa); ws['!merges'] = [{ s: { r: 1, c: 1 }, e: { r: 3, c: 1 } }]
+  const wb = XLSX_().utils.book_new(); XLSX_().utils.book_append_sheet(wb, ws, 'S')
+  const buf = XLSX_().write(wb, { type: 'array', bookType: 'xlsx' })
+  const fileLike = () => ({ name: 't.xlsx', size: buf.byteLength, arrayBuffer: async () => buf })
+  const E = window.ExcelUtil
+  const rAll = await E.readFile(fileLike(), { headerRow: -1, forwardFill: true })
+  const rMer = await E.readFile(fileLike(), { headerRow: -1, forwardFill: 'merged' })
+  const rNo  = await E.readFile(fileLike(), { headerRow: -1 })
+  ok(rAll[2][2] === '누수' && rAll[3][3] === '37.2', "true(예전): 빈 비고·위도까지 위 값으로 채워짐 (문제 재현)", rAll.slice(1).map(r => r.join('|')))
+  ok(rMer[2][1] === '1구역' && rMer[3][1] === '1구역', "'merged': 병합된 구역은 채움", rMer.slice(1).map(r => r.join('|')))
+  ok(rMer[2][2] === '' && rMer[3][3] === '' && rMer[4][2] === '', "'merged': 원래 빈 비고·위도는 빈 칸 유지")
+  ok(rMer.every(r => r.every(c => typeof c === 'string')), "'merged': 예전처럼 모두 문자열")
+  ok(rNo[2][1] === '', 'false: 채우지 않음')
+
+  // createReader 화면 흐름 (기본값 = 예전 동작 유지 확인 + 'merged')
+  async function viaReader(opt) {
+    let got = null
+    const r = E.createReader(Object.assign({ columns: [{ id: 'name', label: '이름', required: true, keywords: ['이름'] }], storageKey: 't' + Math.random(), onConfirm: (h, rows) => { got = rows } }, opt))
+    await r.open(fileLike())
+    const btn = [...window.document.querySelectorAll('button')].filter(b => b.textContent === '확인').pop(); btn.click()
+    return got
+  }
+  const gDef = await viaReader({}), gMer = await viaReader({ forwardFill: 'merged' })
+  ok(gDef && gDef[1][2] === '누수', 'createReader 기본값: 예전과 같은 결과 (하위 호환)')
+  ok(gMer && gMer[1][1] === '1구역' && gMer[1][2] === '' && gMer[2][3] === '', "createReader 'merged': 병합만 채움", gMer && gMer.map(r => r.join('|')))
+
+  done()
+})().catch(e => { ok(false, '시험 중 오류: ' + e.message); done() })
+
+</script>
+</body>
+</html>

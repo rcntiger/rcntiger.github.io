@@ -5,9 +5,12 @@ rcntiger.github.io/common/ 에 올려두고 모든 앱에서 CDN처럼 불러쓰
 새 채팅에서 앱을 만들 때는 이렇게 요청하면 됩니다.
 ```
 rcntiger.github.io/common/ 에 있는 공통 모듈(logger.js, utils.js, supabase.js,
-kakao.js, kakao-ui.js, icon.js, excel.js, telegram.js)을 활용해서
+keys.js, kakao-geo.js, excel.js 등)을 활용해서
 [원하는 앱 설명] 만들어줘.
 ```
+
+> ⚠ **공통 모듈을 고칠 때는 맨 아래 [공통 모듈 수정 규칙](#공통-모듈-수정-규칙)을 먼저 읽으세요.**
+> 여기 파일은 여러 앱이 같은 주소로 읽기 때문에, push하면 약 10분 안에 모든 앱에 동시에 반영됩니다.
 
 ---
 
@@ -24,15 +27,26 @@ rcntiger.github.io/
     kakao-ui.js    ← 지도 툴바 UI (검색·위성·거리재기·로드뷰·출발지·아이콘)
     icon.js        ← 커스텀 마커 아이콘 관리 (업로드/내장 아이콘/Kakao MarkerImage 변환)
     excel.js       ← Excel 읽기/쓰기/UI모달/다중필터 (SheetJS 통합)
+    keys.js        ← 공개해도 되는 공통 키 (카카오 JS 키, Supabase url·anon 키, Cloudinary) — 전역 APP_KEYS
+    kakao-geo.js   ← 카카오 지도 SDK 불러오기 + 주소↔좌표·장소 검색 (JS 키, REST 키 불필요) — 전역 KakaoGeo
+    config.js      ← 다른 소방서 배포용: 사용자가 직접 키를 입력해 저장 — 전역 ConfigUtil
+    test.html      ← 공통 모듈 점검 페이지 (고친 뒤 열어서 모두 ✅인지 확인)
 ```
+
+`kakao.js`(KakaoUtil)와 `kakao-geo.js`(KakaoGeo), `config.js`(ConfigUtil)와 `keys.js`(APP_KEYS)는 **이름만 비슷한 별개 파일**입니다.
+새 앱의 지도·주소 검색은 `keys.js` + `kakao-geo.js`를 쓰고, `kakao.js`는 마커·클러스터·거리재기 같은 지도 도우미가 필요할 때 함께 씁니다.
 
 ### 로드 순서 (중요)
 
 ```html
 <!-- 1. 외부 SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="//dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KEY&libraries=services,clusterer"></script>
+<!-- 카카오 지도 SDK는 kakao-geo.js가 불러온다 (KakaoGeo.init → KakaoGeo.load). 키를 HTML에 직접 쓰지 않는다 -->
 <!-- excel.js는 SheetJS를 자체적으로 동적 로드하므로 별도 script 불필요 -->
+
+<!-- 1-1. 공통 키 + 지도 SDK 도우미 -->
+<script src="https://rcntiger.github.io/common/keys.js"></script>
+<script src="https://rcntiger.github.io/common/kakao-geo.js"></script>
 
 <!-- 2. logger 먼저 -->
 <script src="https://rcntiger.github.io/common/logger.js"></script>
@@ -50,6 +64,9 @@ rcntiger.github.io/
 ```
 
 각 모듈은 `window.Logger`가 있으면 자동으로 사용하고, 없으면 `console`로 fallback 합니다.
+
+모든 모듈은 함수로 감싸져 있어 **두 번 불러와도 페이지가 멈추지 않습니다** (이미 같은 전역이 있으면 처음 것을 그대로 씀).
+예전처럼 최상위 `const Utils = ...`로 선언하면, 앱에 같은 이름이 있거나 파일이 두 번 들어갔을 때 페이지 전체가 SyntaxError로 멈췄습니다.
 
 ---
 
@@ -76,10 +93,11 @@ Logger.error('저장 실패', err)  // 항상 보임
 | 함수 | 설명 |
 |---|---|
 | `init(url, key)` | 클라이언트 초기화 (SDK 미로드 시 친절한 에러 안내) |
-| `select(table, options)` | 조회 (eq/neq/order/limit) |
+| `select(table, options)` | 조회 (eq/neq/order/limit) — ⚠ **최대 1000행** (Supabase 서버 제한, 넘으면 말없이 잘림) |
+| `selectAll(table, options)` | **1000행씩 나눠서 끝까지** 조회. 소화전 목록·완료 기록·이력처럼 1000행을 넘을 수 있는 표는 이걸 쓴다. `key`: 순서 고정용 고유 칸 (기본 `'id'`, id 없는 표는 `'item_id'` 등) |
 | `insert(table, payload)` | 삽입 |
-| `update(table, payload, eq)` | 수정 |
-| `remove(table, eq)` | 삭제 |
+| `update(table, payload, eq)` | 수정 — 조건(`eq`)이 비면 표 전체가 바뀌므로 **오류로 막음** |
+| `remove(table, eq)` | 삭제 — 조건이 비면 **오류로 막음** |
 | `upsert(table, payload)` | 삽입 or 수정 |
 | `uploadFile(bucket, path, blob)` | Storage 업로드 → public URL 반환 |
 | `deleteFile(bucket, path)` | Storage 삭제 |
@@ -113,8 +131,8 @@ SupabaseUtil.startKeepAlive('inspections')  // 9분마다 ping
 
 | 함수 | 설명 |
 |---|---|
-| `today()` | 'YYYY-MM-DD' |
-| `formatDate(date)` | Date → 'YYYY-MM-DD' |
+| `today()` | 'YYYY-MM-DD' (이 기기 시간대 기준 — 예전엔 UTC라 한국 새벽 0~9시에 전날이 나왔음) |
+| `formatDate(date)` | Date·'YYYY-MM-DD'·ISO 시각 → 'YYYY-MM-DD' (이 기기 시간대 기준, 해석 불가 시 '') |
 | `formatDateKo(str)` | 'YYYY-MM-DD' → 'YYYY년 MM월 DD일' |
 | `dday(targetDate)` | `{ diff, label, color }` 반환 |
 | `lsSet(key, value, prefix?)` | localStorage 저장 |
@@ -127,6 +145,7 @@ SupabaseUtil.startKeepAlive('inspections')  // 9분마다 ping
 | `handleError(err, options?)` | 에러를 콘솔+Toast+Telegram 동시 처리 |
 | `telegramSend(token, chatId, text)` | Telegram 단발 전송 |
 | `copyToClipboard(text)` | 클립보드 복사 |
+| `esc(s)` | HTML 특수문자 이스케이프 — 사용자 입력·엑셀 값을 `innerHTML`에 넣기 전에 반드시 거친다 [신규] |
 | `comma(n)` | 천 단위 콤마 |
 | `sleep(ms)` | 딜레이 |
 | `parseQuery()` | URL 파라미터 → 객체 |
@@ -302,7 +321,8 @@ await TelegramUtil.sendTable('잔여티 현황', rows)
 |---|---|
 | `loadSheetJS()` | SheetJS 동적 로드 (없으면 CDN에서 자동) |
 | `ACCEPT` | 지원 파일 형식 문자열 (xlsx·xls·csv·ods·tsv·html, input accept용) |
-| `forwardFill(rows)` | 2D 배열 병합 셀 처리 |
+| `forwardFill(rows)` | 2D 배열의 모든 빈 칸을 같은 열 위 행 값으로 채움 (예전 방식) |
+| `fillMerged(ws)` | 시트의 **병합된 칸만** 채운 사본 [신규] |
 | `readFile(file, options)` | Excel → 객체 배열 (UI 없이, `file.arrayBuffer()` 방식이라 FileReader 불필요) |
 | `getSheetNames(file)` | 시트 이름 목록 |
 
@@ -317,7 +337,11 @@ await TelegramUtil.sendTable('잔여티 현황', rows)
 - `onConfirm(headers, rows2d, mapping)` : 확인 버튼 클릭 시 콜백. **필터 적용된 행만 전달됨**
 - `defaultHeaderRow` : 기본 헤더 행 (0-based, 1~5행 선택 가능)
 - `confirmLabel` : 확인 버튼 텍스트
-- `forwardFill` : 병합 셀 자동 처리 (기본 true)
+- `forwardFill` : 병합 셀 처리
+  - `'merged'` — **병합된 칸만 채움 (권장)**. 원래 비어 있던 칸은 빈 칸으로 둔다.
+  - `true` — 모든 빈 칸을 위 행 값으로 채움 (기본값, 하위 호환용). ⚠ 비고·좌표·완료여부처럼 원래 빈 칸까지 위 행 값이 들어간다.
+  - `false` — 채우지 않음
+  - 어느 방식이든 `onConfirm`에 넘어오는 값은 앞뒤 공백 없는 문자열이다.
 
 **다중 필터**: `+ 필터 추가` 버튼으로 여러 컬럼을 동시에(AND 조건) 필터링 가능. 각 필터는 `값 제외` / `값만 선택` 모드 전환 가능, 값별 건수 표시.
 
@@ -328,7 +352,7 @@ const reader = ExcelUtil.createReader({
     { id: 'team', label: '팀',   required: false, keywords: ['팀','구역','담당'] },
   ],
   confirmLabel: '배분 시작',
-  forwardFill: true,
+  forwardFill: 'merged',
   onConfirm: (headers, rows, mapping) => {
     // rows: 필터 적용된 2D 배열
     // mapping: { addr: 2, team: 5 } (컬럼 인덱스)
@@ -362,9 +386,9 @@ fileInput.onchange = e => reader.open(e.target.files[0])
 | 함수 | 설명 |
 |---|---|
 | `download(sheets, filename, options)` | 다중 시트 Excel 다운로드 |
-| `parseKBBank(file)` | KB국민은행 거래내역 파싱 |
-| `exportFieldCheck(data, filename)` | field-check 4시트 내보내기 |
-| `exportAptCheck(data, filename)` | apt_check 팀별 시트 내보내기 |
+| `parseKBBank(file)` | KB국민은행 거래내역 파싱 (앱 전용 — 새로 쓰지 말 것) |
+| `exportFieldCheck(data, filename)` | field-check 4시트 내보내기 (앱 전용 — 현재 field-check는 자체 구현 사용) |
+| `exportAptCheck(data, filename)` | apt_check 팀별 시트 내보내기 (앱 전용) |
 
 ```javascript
 await ExcelUtil.download([
@@ -435,23 +459,50 @@ https://rcntiger.github.io/common/excel.js
 
 ## 앱별 적용 현황
 
-| 앱 | logger | supabase | utils | telegram | kakao | kakao-ui | icon | excel |
-|---|---|---|---|---|---|---|---|---|
-| field-check | - | O | O | - | O | - | - | O (자체구현, 교체예정) |
-| apt_check | - | O | O | - | O | - | - | O (자체구현, 교체예정) |
-| inspection-assign | O | - | O | - | - | - | - | O (createReader 적용완료) |
-| coffee_order | - | O | O | - | - | - | - | - |
-| 초과근무 | - | O | O | - | - | - | - | - |
-| 식대정산 | - | - | O | - | - | - | - | O |
-| airforce_golf | - | - | O | O | - | - | - | - |
-| QuickCatchM | - | - | O | O | - | - | - | - |
-| my_stocks | - | - | O | O | - | - | - | - |
+2026-10-23에 공개 저장소를 실제로 내려받아 확인한 결과입니다. (✔ = 불러와서 사용)
 
-logger는 새로 추가된 모듈이라 각 앱에 직접 반영 전까지 빈 칸으로 둡니다.
+| 앱 | logger | utils | supabase | excel | keys | kakao-geo | kakao | kakao-ui | icon | config | telegram |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 119hyd-Map | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
+| 119hyd-Map2 | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
+| field-check | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
+| 119hyd-inspec | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - | - | - |
+| work-div | ✔ | ✔ | - | ✔ | - | - | - | - | - | - | - |
+| apt_check, coffee_order, moim | 공통 모듈 사용 안 함 |||||||||||
+
+저장소 이름을 몰라 확인하지 못한 앱(inspection-map 새 이름, 초과근무, rebalancer 등)이 더 있을 수 있습니다.
+`kakao.js`·`kakao-ui.js`·`icon.js`·`config.js`·`telegram.js`는 현재 쓰는 앱이 없습니다.
+
+---
+
+## 공통 모듈 수정 규칙
+
+여기 파일은 모든 앱이 같은 주소로 읽고, GitHub Pages 캐시가 10분이라 **push하면 약 10분 안에 모든 앱에 동시에 반영**됩니다.
+
+1. **같은 이름으로 새 파일을 만들지 않는다.** 새 기능이 필요하면 기존 파일에 추가하거나, 겹치지 않는 새 이름을 쓴다. (2026-10-06 `config.js`·`kakao.js` 덮어쓰기 사고)
+2. **기존 함수의 동작을 바꾸지 않는다(하위 호환).** 바꿔야 하면 새 옵션 값을 추가하고 기본값은 그대로 둔 뒤, 앱에서 하나씩 새 옵션으로 옮긴다. (예: `forwardFill: 'merged'`)
+3. **고치기 전에 위 '앱별 적용 현황'에서 영향받는 앱을 확인한다.**
+4. **크게 고치기 전에 스냅샷 브랜치를 남긴다.** 예: `snapshot/common-v1` (2026-10-23 수정 전 상태). 문제가 생기면 이 브랜치의 파일로 되돌린다.
+5. **push 후 [test.html](https://rcntiger.github.io/common/test.html)을 열어 모두 ✅인지 확인**하고, 영향받는 앱을 한 번씩 열어 본다.
 
 ---
 
 ## 최근 변경 이력
+
+### 2026-10-23
+- **전체**: 모든 모듈을 함수로 감싸 두 번 불러와도 멈추지 않게 함 (`if (window.X) return`)
+- **kakao.js**: `new kakao().Map(...)`이 'kakao is not a constructor' 오류로 지도·마커·클러스터·로드뷰·거리재기가 **처음부터 전부 동작하지 않던 버그** 수정. 기본 중심·출발지 좌표를 도로명 주소로 확인한 값으로 교체(금천소방서 시흥대로 342, 시흥119 시흥대로45길 31). 거리재기 상태를 지도별로 분리. 길찾기에서 앱이 열리면 웹을 또 열지 않음. 근처에 로드뷰가 없을 때 오류 안 나게 함
+- **kakao-ui.js**: 옵션(`roadview`·`distance` 등)을 생략하면 툴바 생성이 통째로 실패하던 버그 수정. 출발지 이름 HTML 이스케이프
+- **utils.js**: `today()`·`formatDate()`를 이 기기 시간대 기준으로 (한국 새벽 0~9시 전날 날짜 버그). `esc()` 추가. iPad 판별 보완. localStorage 삭제 예외 처리
+- **supabase.js**: `selectAll()` 추가 (1000행 제한 회피, 119hyd-Map2 v3.10.1의 sbSelectAll을 공통화). 조건 없는 `update`/`remove` 차단. keep-alive 실패 시 콘솔 오류 안 쌓이게
+- **excel.js**: `forwardFill: 'merged'` 추가 (병합된 칸만 채움, 기본값은 그대로). SheetJS 버전 고정(0.20.3) + 실패 시 jsDelivr 0.18.5로 대체. 사용자 컬럼명 이스케이프. SheetJS 로드 실패 시 안내
+- **icon.js**: 아이콘 이름 이스케이프, Storage 경로에 한글 파일명 대신 시각+확장자 사용
+- **config.js**: 설정 가져오기 코드에서 등록된 항목만 저장
+- **keys.js / kakao-geo.js**: 두 번 불러와도 처음 것 유지
+- **test.html**: 공통 모듈 점검 페이지 추가
+- `config.js`·`kakao.js` 줄바꿈을 다른 파일과 같은 LF로 통일 (내용 변경 없음, 이 때문에 diff가 큼)
+
+### 이전
 
 - **utils.js**: `isMobileView()`, `isMobileApp()`, `BREAKPOINT` 추가 — PC/모바일 분기 기준을 앱 전체에서 통일
 - **kakao.js**: `openNaviApp()` 추가 — field-check에 중복돼 있던 길찾기(모바일 딥링크+웹 fallback) 로직을 공통화

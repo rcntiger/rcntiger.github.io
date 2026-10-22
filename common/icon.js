@@ -19,7 +19,15 @@
  *   </script>
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 IconUtil가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.IconUtil) return
+
 const IconUtil = (() => {
+  // HTML 이스케이프 (출발지·아이콘 이름 등 사용자 입력을 innerHTML에 넣을 때)
+  function _esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
+
 
   // ────────────────────────────────────────────
   // 설정
@@ -84,7 +92,8 @@ const IconUtil = (() => {
   }
 
   function _saveCustom(list) {
-    localStorage.setItem(_config.storageKey, JSON.stringify(list))
+    try { localStorage.setItem(_config.storageKey, JSON.stringify(list)) }
+    catch (e) { console.warn('[IconUtil] 아이콘 목록 저장 실패 (저장 공간 부족 등):', e); throw e }
   }
 
   // ────────────────────────────────────────────
@@ -146,7 +155,9 @@ const IconUtil = (() => {
     // URL 결정
     let url
     if (useStorage && window.SupabaseUtil) {
-      const path = `custom/${Date.now()}_${file.name}`
+      // Storage 경로에는 한글·공백을 쓸 수 없어 시각 + 확장자만 사용 (원래 이름은 icon.name에 보관)
+      const ext  = ((file.name.split('.').pop() || 'png').toLowerCase().match(/^[a-z0-9]{1,5}$/) || ['png'])[0]
+      const path = `custom/${Date.now()}.${ext}`
       url = await window.SupabaseUtil.uploadFile(_config.bucket, path, file)
     } else {
       // base64 fallback (Storage 없을 때)
@@ -330,7 +341,7 @@ const IconUtil = (() => {
       const item = document.createElement('div')
       item.className = 'icon-picker-item' + (icon.id === selectedId ? ' selected' : '')
       item.dataset.id = icon.id
-      item.innerHTML = `<img src="${icon.url}" alt="${icon.name}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><text y=%2220%22 font-size=%2220%22>📍</text></svg>'"><span>${icon.name}</span>`
+      item.innerHTML = `<img src="${_esc(icon.url)}" alt="${_esc(icon.name)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><text y=%2220%22 font-size=%2220%22>📍</text></svg>'"><span>${_esc(icon.name)}</span>`
       item.addEventListener('click', () => {
         grid.querySelectorAll('.icon-picker-item').forEach(el => el.classList.remove('selected'))
         item.classList.add('selected')
@@ -416,4 +427,5 @@ const IconUtil = (() => {
   }
 })()
 
-window.IconUtil = IconUtil
+g.IconUtil = IconUtil
+})(window)

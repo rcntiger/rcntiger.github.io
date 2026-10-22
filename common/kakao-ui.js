@@ -22,7 +22,15 @@
  *   </script>
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 KakaoUI가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.KakaoUI) return
+
 const KakaoUI = (() => {
+  // HTML 이스케이프 (출발지·아이콘 이름 등 사용자 입력을 innerHTML에 넣을 때)
+  function _esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
+
 
   // ────────────────────────────────────────────
   // 공통 스타일 주입 (최초 1회)
@@ -164,7 +172,7 @@ const KakaoUI = (() => {
 
     // ── 검색 ──────────────────────────────────
     if (options.search) {
-      const cfg = options.search === true ? {} : options.search
+      const cfg = _opt(options.search)
       const wrap = document.createElement('div')
       wrap.className = 'kui-search-wrap'
 
@@ -223,7 +231,7 @@ const KakaoUI = (() => {
 
     // ── 거리재기 ──────────────────────────────
     if (options.distance !== false) {
-      const cfg = options.distance === true ? {} : options.distance
+      const cfg = _opt(options.distance)
 
       // 거리 뱃지 (지도 컨테이너에 추가)
       const badge = document.createElement('div')
@@ -255,7 +263,7 @@ const KakaoUI = (() => {
 
     // ── 로드뷰 ────────────────────────────────
     if (options.roadview !== false) {
-      const cfg     = options.roadview === true ? {} : options.roadview
+      const cfg     = _opt(options.roadview)
       const rvId    = cfg.containerId || '__kui_roadview__'
 
       // 로드뷰 div 생성
@@ -290,7 +298,7 @@ const KakaoUI = (() => {
 
     // ── 출발지 설정 ───────────────────────────
     if (options.station !== false) {
-      const cfg      = options.station === true ? {} : options.station
+      const cfg      = _opt(options.station)
       const stations = KakaoUtil.createStationManager(cfg.storageKey)
       let   selected = stations.load()[0]?.id || null
 
@@ -307,7 +315,7 @@ const KakaoUI = (() => {
 
     // ── 아이콘 선택 ───────────────────────────
     if (options.icon) {
-      const cfg = options.icon === true ? {} : options.icon
+      const cfg = _opt(options.icon)
 
       const btn = _btn('🎨', '아이콘', () => {
         if (_activePanel) { closePanel(); return }
@@ -357,9 +365,9 @@ const KakaoUI = (() => {
         </div>
         <div class="kui-station-list">
           ${list.map(s => `
-            <div class="kui-station-item ${s.id === selectedId ? 'active' : ''}" data-id="${s.id}">
-              <span>📍 ${s.name}</span>
-              ${s.builtin ? '' : `<button class="kui-station-del" data-del="${s.id}">×</button>`}
+            <div class="kui-station-item ${s.id === selectedId ? 'active' : ''}" data-id="${_esc(s.id)}">
+              <span>📍 ${_esc(s.name)}</span>
+              ${s.builtin ? '' : `<button class="kui-station-del" data-del="${_esc(s.id)}">×</button>`}
             </div>
           `).join('')}
         </div>
@@ -436,6 +444,10 @@ const KakaoUI = (() => {
   // 내부 헬퍼
   // ────────────────────────────────────────────
 
+  // 옵션 값이 true·생략(undefined)·객체 어느 것이든 설정 객체로 바꾼다
+  // (예전엔 생략하면 undefined.containerId 등을 읽다가 툴바 생성이 통째로 실패했음 — 2026-10-23)
+  function _opt(v) { return (v && typeof v === 'object') ? v : {} }
+
   function _btn(icon, title, onClick) {
     const btn = document.createElement('button')
     btn.className   = 'kui-btn'
@@ -458,4 +470,5 @@ const KakaoUI = (() => {
   return { createToolbar }
 })()
 
-window.KakaoUI = KakaoUI
+g.KakaoUI = KakaoUI
+})(window)

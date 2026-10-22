@@ -12,6 +12,11 @@
  *   </script>
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 Utils가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.Utils) return
+
 const Utils = (() => {
   const log = window.Logger || { debug: console.log, warn: console.warn, error: console.error }
 
@@ -19,25 +24,40 @@ const Utils = (() => {
   // 날짜 / D-day
   // ────────────────────────────────────────────
 
+  // Date → 이 기기 시간대 기준 'YYYY-MM-DD'
+  // (toISOString은 UTC라서 한국 시간 00:00~08:59에는 전날 날짜가 나온다 — 2026-10-23 수정)
+  function _ymd(d) {
+    const p = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  }
+
+  // 'YYYY-MM-DD'는 이 기기 시간대의 그날 0시로, 그 밖의 값은 Date가 해석하는 대로
+  function _toDate(v) {
+    if (v instanceof Date) return v
+    const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(v)
+  }
+
   /**
-   * 오늘 날짜를 'YYYY-MM-DD' 형식으로 반환
+   * 오늘 날짜를 'YYYY-MM-DD' 형식으로 반환 (이 기기 시간대 기준)
    * @returns {string}
    * @example Utils.today() // '2025-06-01'
    */
   function today() {
-    return new Date().toISOString().slice(0, 10)
+    return _ymd(new Date())
   }
 
   /**
-   * Date → 'YYYY-MM-DD'
-   * @param {Date|string} date
-   * @returns {string}
+   * Date → 'YYYY-MM-DD' (이 기기 시간대 기준)
+   * @param {Date|string} date - Date, 'YYYY-MM-DD', ISO 시각 문자열 등
+   * @returns {string} 해석할 수 없으면 ''
    * @example Utils.formatDate(new Date()) // '2025-06-01'
+   * @example Utils.formatDate('2026-10-22T23:30:00Z') // '2026-10-23' (한국 시간)
    */
   function formatDate(date) {
     if (!date) return ''
-    const d = date instanceof Date ? date : new Date(date)
-    return d.toISOString().slice(0, 10)
+    const d = _toDate(date)
+    return isNaN(d) ? '' : _ymd(d)
   }
 
   /**
@@ -64,7 +84,7 @@ const Utils = (() => {
   function dday(targetDate) {
     if (!targetDate) return { diff: null, label: '', color: '#aaa' }
     const now = new Date(); now.setHours(0, 0, 0, 0)
-    const tgt = new Date(targetDate); tgt.setHours(0, 0, 0, 0)
+    const tgt = _toDate(targetDate); tgt.setHours(0, 0, 0, 0)
     const diff = Math.round((tgt - now) / 86400000)
 
     let label, color
@@ -112,7 +132,8 @@ const Utils = (() => {
    * @param {string} prefix
    */
   function lsRemove(key, prefix = '') {
-    localStorage.removeItem(prefix + key)
+    try { localStorage.removeItem(prefix + key) }
+    catch (e) { log.warn('[Utils] lsRemove 실패:', e) }
   }
 
   /**
@@ -121,9 +142,11 @@ const Utils = (() => {
    * @example Utils.lsClear('fieldcheck_')
    */
   function lsClear(prefix = '') {
-    Object.keys(localStorage)
-      .filter(k => k.startsWith(prefix))
-      .forEach(k => localStorage.removeItem(k))
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith(prefix))
+        .forEach(k => localStorage.removeItem(k))
+    } catch (e) { log.warn('[Utils] lsClear 실패:', e) }
   }
 
   // ────────────────────────────────────────────
@@ -315,6 +338,18 @@ const Utils = (() => {
   }
 
   /**
+   * HTML 특수문자 이스케이프 — 사용자 입력·엑셀 값 등을 innerHTML에 넣기 전에 반드시 거친다
+   * @param {*} s
+   * @returns {string}
+   * @example el.innerHTML = `<b>${Utils.esc(name)}</b>`
+   */
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  }
+
+  /**
    * 숫자에 천 단위 콤마
    * @param {number} n
    * @returns {string}
@@ -394,7 +429,9 @@ const Utils = (() => {
    *   else window.open(webUrl)
    */
   function isMobileApp() {
-    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    // iPadOS 13+ 사파리는 Mac으로 표시되므로 터치 지원 여부로 함께 판별
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
   }
 
   // ────────────────────────────────────────────
@@ -415,10 +452,11 @@ const Utils = (() => {
     // Telegram
     telegramSend,
     // 기타
-    copyToClipboard, comma, sleep, parseQuery, buildQuery, maskName,
+    copyToClipboard, esc, comma, sleep, parseQuery, buildQuery, maskName,
     // 디바이스 판별
     isMobileView, isMobileApp, BREAKPOINT,
   }
 })()
 
-window.Utils = Utils
+g.Utils = Utils
+})(window)

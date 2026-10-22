@@ -12,7 +12,13 @@
  *     Logger.error('오류 발생', err)
  *     Logger.debug('디버그 정보')   // 로컬호스트에서만 출력
  *   </script>
+ *
+ * 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록
+ * 함수로 감싸고, 이미 Logger가 있으면 그대로 둔다. (2026-10-23)
  */
+
+;(function (g) {
+if (g.Logger) return
 
 const Logger = (() => {
   // localhost / 127.0.0.1 / file:// 이면 개발 환경
@@ -55,4 +61,5 @@ const Logger = (() => {
   return { debug, info, warn, error, setLevel, isDev }
 })()
 
-window.Logger = Logger
+g.Logger = Logger
+})(window)

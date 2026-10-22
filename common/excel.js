@@ -49,6 +49,11 @@
  *   ], '결과.xlsx')
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 ExcelUtil가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.ExcelUtil) return
+
 const ExcelUtil = (() => {
   'use strict'
 
@@ -58,24 +63,39 @@ const ExcelUtil = (() => {
   // SheetJS 동적 로드
   // ────────────────────────────────────────────
 
-  const SHEETJS_CDN = 'https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'
+  // 버전 고정 (예전엔 xlsx-latest라 SheetJS가 바뀌면 모든 앱이 예고 없이 바뀔 수 있었음 — 2026-10-23)
+  // 첫 주소가 막히면(사내망·추적 방지 등) 다음 주소로 시도
+  const SHEETJS_CDNS = [
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+  ]
   let _sheetjsLoading = null
 
+  function _loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src     = src
+      s.onload  = () => window.XLSX ? resolve() : reject(new Error('XLSX 없음'))
+      s.onerror = () => { s.remove(); reject(new Error('불러오기 실패')) }
+      document.head.appendChild(s)
+    })
+  }
+
   /**
-   * SheetJS 동적 로드 (없으면 CDN에서 자동)
+   * SheetJS 동적 로드 (없으면 CDN에서 자동, 실패하면 다음 주소로)
    * @returns {Promise<void>}
    * @example await ExcelUtil.loadSheetJS()
    */
   function loadSheetJS() {
     if (window.XLSX) return Promise.resolve()
     if (_sheetjsLoading) return _sheetjsLoading
-    _sheetjsLoading = new Promise((resolve, reject) => {
-      const s = document.createElement('script')
-      s.src     = SHEETJS_CDN
-      s.onload  = () => { log.debug('[ExcelUtil] SheetJS 로드 완료'); resolve() }
-      s.onerror = () => reject(new Error('[ExcelUtil] SheetJS 로드 실패. 네트워크를 확인하세요.'))
-      document.head.appendChild(s)
-    })
+    _sheetjsLoading = (async () => {
+      for (const src of SHEETJS_CDNS) {
+        try { await _loadScript(src); log.debug('[ExcelUtil] SheetJS 로드 완료:', src); return }
+        catch (e) { log.warn('[ExcelUtil] SheetJS 로드 실패, 다음 주소 시도:', src) }
+      }
+      throw new Error('[ExcelUtil] SheetJS 로드 실패. 네트워크를 확인하세요.')
+    })().catch(e => { _sheetjsLoading = null; throw e })   // 실패하면 다음 호출에서 다시 시도
     return _sheetjsLoading
   }
 
@@ -129,12 +149,14 @@ const ExcelUtil = (() => {
   // ────────────────────────────────────────────
 
   /**
-   * 2D 배열에서 빈 셀을 왼쪽 값으로 채움 (병합 셀 처리)
+   * 2D 배열에서 빈 셀을 같은 열의 '위 행' 값으로 채움 (forwardFill: true / 'all' 방식)
+   * ⚠ 병합 여부와 상관없이 모든 빈 칸을 채운다 — 원래 비어 있던 비고·좌표·완료여부까지 위 행 값이 들어간다.
+   *   병합된 칸만 채우려면 readFile / createReader에 forwardFill: 'merged'를 쓴다.
    * @param {Array[]} rows
    * @returns {Array[]}
    * @example
    *   ExcelUtil.forwardFill([['A','','B'],['','C','']])
-   *   // → [['A','A','B'],['A','C','C']]
+   *   // → [['A','','B'],['A','C','B']]
    */
   function forwardFill(rows) {
     const last = []
@@ -143,6 +165,50 @@ const ExcelUtil = (() => {
       if (v) { last[i] = v; return v }
       return last[i] || ''
     }))
+  }
+
+  /**
+   * 시트의 병합 범위(!merges)마다 왼쪽 위 칸의 값을 범위 안 모든 칸에 복사한 '새 시트'를 돌려준다.
+   * 원래 비어 있던(병합되지 않은) 칸은 그대로 비어 있다. 원본 시트는 바꾸지 않는다.
+   * @param {object} ws - SheetJS worksheet
+   * @returns {object} 병합 칸이 채워진 worksheet 사본
+   */
+  function fillMerged(ws) {
+    const merges = ws && ws['!merges']
+    if (!merges || !merges.length) return ws
+    const X = _xlsx()
+    const out = Object.assign({}, ws)
+    merges.forEach(m => {
+      const src = ws[X.utils.encode_cell(m.s)]
+      if (!src) return
+      for (let R = m.s.r; R <= m.e.r; R++) {
+        for (let C = m.s.c; C <= m.e.c; C++) {
+          if (R === m.s.r && C === m.s.c) continue
+          out[X.utils.encode_cell({ r: R, c: C })] = Object.assign({}, src)
+        }
+      }
+    })
+    return out
+  }
+
+  /**
+   * forwardFill 옵션 해석
+   *   'merged'        → 병합된 칸만 채움 (권장)
+   *   true / 'all'    → 모든 빈 칸을 위 행 값으로 채움 (예전 방식, 하위 호환용)
+   *   false / 없음    → 채우지 않음
+   * @returns {Array[]} 2D 배열
+   */
+  function _sheetTo2d(ws, mode, raw) {
+    const X = _xlsx()
+    const sheet = mode === 'merged' ? fillMerged(ws) : ws
+    const o = { header:1, defval:'' }
+    if (raw !== undefined) o.raw = raw      // 지정하지 않으면 SheetJS 기본값 그대로 (예전 동작 유지)
+    let rows = X.utils.sheet_to_json(sheet, o)
+    if (mode === true || mode === 'all') rows = forwardFill(rows)
+    // 'merged'도 예전 채우기 방식과 똑같이 '앞뒤 공백 없는 문자열'로 돌려준다
+    // → 앱에서 true를 'merged'로 바꿨을 때 달라지는 것은 '어느 빈 칸을 채우느냐' 하나뿐
+    else if (mode === 'merged') rows = rows.map(r => r.map(c => String(c ?? '').trim()))
+    return rows
   }
 
   // ────────────────────────────────────────────
@@ -157,7 +223,7 @@ const ExcelUtil = (() => {
    *   sheetName   : 시트 이름 (sheetIndex보다 우선)
    *   headerRow   : 헤더 행 0-based (기본 0). -1이면 2D 배열 반환
    *   colMap      : 컬럼 리매핑 { '원본헤더': '새헤더' }
-   *   forwardFill : 병합 셀 처리 (기본 false)
+   *   forwardFill : 병합 셀 처리 — 'merged'(병합 칸만, 권장) | true(모든 빈 칸) | false (기본 false)
    *   raw         : true면 날짜/숫자 원본 유지 (기본 false)
    * @returns {Promise<Array>}
    * @example
@@ -178,8 +244,7 @@ const ExcelUtil = (() => {
 
     const { headerRow = 0, colMap, raw = false } = options
 
-    let raw2d = _xlsx().utils.sheet_to_json(ws, { header:1, defval:'', raw })
-    if (options.forwardFill) raw2d = forwardFill(raw2d)
+    const raw2d = _sheetTo2d(ws, options.forwardFill, raw)
 
     // 2D 배열 반환
     if (headerRow < 0) return raw2d
@@ -238,7 +303,7 @@ const ExcelUtil = (() => {
     'rgba(220,38,38,.15)',
   ]
 
-  function _esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+  function _esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') }
   function _el(tag, css, text) {
     const e = document.createElement(tag)
     if (css)              e.style.cssText = css
@@ -258,7 +323,10 @@ const ExcelUtil = (() => {
    *                     mapping = { colId: colIndex | null }
    *   defaultHeaderRow: 0-based (기본 0 = 1행)
    *   confirmLabel    : 버튼 텍스트 (기본 '확인')
-   *   forwardFill     : 병합 셀 처리 (기본 true)
+   *   forwardFill     : 병합 셀 처리 (기본 true — 하위 호환)
+   *                     'merged' = 병합된 칸만 채움 (권장. 원래 빈 칸은 빈 칸으로 둠)
+   *                     true     = 모든 빈 칸을 위 행 값으로 채움 (예전 방식)
+   *                     false    = 채우지 않음
    * @returns { show, hide, open, getRows, getHeaders }
    * @example
    *   const reader = ExcelUtil.createReader({
@@ -279,7 +347,7 @@ const ExcelUtil = (() => {
     const onConfirm    = opts.onConfirm || (() => {})
     const defHdrRow    = opts.defaultHeaderRow ?? 0
     const confirmLabel = opts.confirmLabel || '확인'
-    const doFill       = opts.forwardFill !== false
+    const fillMode     = opts.forwardFill === undefined ? true : opts.forwardFill
 
     let _wb = null, _headers = [], _rows2d = [], _sheetIdx = 0, _headerRow = defHdrRow
 
@@ -610,7 +678,8 @@ const ExcelUtil = (() => {
         return
       }
 
-      await loadSheetJS()
+      try { await loadSheetJS() }
+      catch (e) { _notify(e.message, 'error'); return }
       fileInfo.textContent = `불러오는 중... ${file.name}`
       step1.style.display = 'none'; step2.style.display = ''
       try {
@@ -634,8 +703,7 @@ const ExcelUtil = (() => {
     function _parseSheet() {
       if (!_wb) return
       const ws   = _wb.Sheets[_wb.SheetNames[_sheetIdx]]
-      let raw2d  = _xlsx().utils.sheet_to_json(ws, { header:1, defval:'' })
-      if (doFill) raw2d = forwardFill(raw2d)
+      const raw2d = _sheetTo2d(ws, fillMode)
 
       // 빈 행 건너뛰며 헤더 자동 탐색
       let hRow = _headerRow
@@ -759,7 +827,7 @@ const ExcelUtil = (() => {
       _headers.forEach((h, i) => {
         const info = selMap[i]
         const th   = document.createElement('th')
-        th.innerHTML = `${_esc(h)||'(없음)'}${info ? `<br><span style="font-size:9px;color:${T.ac}">[${info.label}]</span>` : ''}`
+        th.innerHTML = `${_esc(h)||'(없음)'}${info ? `<br><span style="font-size:9px;color:${T.ac}">[${_esc(info.label)}]</span>` : ''}`
         th.style.cssText = `padding:5px 8px;font-size:11px;color:${T.mt};white-space:nowrap;border:1px solid ${T.bd2};cursor:pointer;background:${info?.color||T.sur};font-weight:600;text-align:left`
         th.title = '클릭하여 컬럼 지정'; th.onclick = ev => _onColClick(i, ev)
         hRow.appendChild(th)
@@ -900,6 +968,8 @@ const ExcelUtil = (() => {
   // ────────────────────────────────────────────
   // 앱별 특화
   // ────────────────────────────────────────────
+  // ※ 아래 세 함수는 특정 앱 전용이라 공통 모듈에 있을 이유가 없다. 지금 쓰는 앱이 없는 것으로 확인했지만
+  //   (2026-10-23 기준 공개 저장소 조사), 확인 못 한 앱이 있을 수 있어 남겨 둔다. 새로 쓰지 말 것.
 
   /** KB국민은행 거래내역 파싱 */
   async function parseKBBank(file) {
@@ -944,7 +1014,7 @@ const ExcelUtil = (() => {
 
   return {
     loadSheetJS, ACCEPT,
-    forwardFill,
+    forwardFill, fillMerged,
     readFile, getSheetNames,
     createReader,
     download,
@@ -952,4 +1022,5 @@ const ExcelUtil = (() => {
   }
 })()
 
-window.ExcelUtil = ExcelUtil
+g.ExcelUtil = ExcelUtil
+})(window)

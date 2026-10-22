@@ -35,6 +35,11 @@
  * 자기 키를 입력하면, defaults를 덮어쓰고 localStorage에 저장됨.
  */
 
+// 두 번 불러오거나 앱에 같은 이름이 있어도 페이지가 멈추지 않도록 함수로 감싸고,
+// 이미 ConfigUtil가 있으면 그대로 둔다. (2026-10-23)
+;(function (g) {
+if (g.ConfigUtil) return
+
 const ConfigUtil = (() => {
   const log = window.Logger || { debug: console.log, info: console.info, warn: console.warn, error: console.error }
 
@@ -241,7 +246,8 @@ const ConfigUtil = (() => {
   function importCode(code) {
     try {
       const cfg = JSON.parse(decodeURIComponent(escape(atob(code.trim()))))
-      Object.entries(cfg).forEach(([k, v]) => set(k, v))
+      const known = new Set(_fields.map(f => f.key))
+      Object.entries(cfg).forEach(([k, v]) => { if (!known.size || known.has(k)) set(k, v) })
       log.info('[ConfigUtil] 설정 가져오기 성공')
       return true
     } catch (e) {
@@ -262,4 +268,5 @@ const ConfigUtil = (() => {
   }
 })()
 
-window.ConfigUtil = ConfigUtil
+g.ConfigUtil = ConfigUtil
+})(window)
