@@ -463,12 +463,13 @@ https://rcntiger.github.io/common/excel.js
 
 | 앱 | logger | utils | supabase | excel | keys | kakao-geo | kakao | kakao-ui | icon | config | telegram |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 119hyd-Map | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
 | 119hyd-Map2 | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
 | field-check | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - |
 | 119hyd-inspec | ✔ | ✔ | ✔ | ✔ | - | - | - | - | - | - | - |
 | work-div | ✔ | ✔ | - | ✔ | - | - | - | - | - | - | - |
 | apt_check, coffee_order, moim | 공통 모듈 사용 안 함 |||||||||||
+
+119hyd-Map은 2026-10-23에 운영을 마치고 119hyd-Map2로 일원화함.
 
 저장소 이름을 몰라 확인하지 못한 앱(inspection-map 새 이름, 초과근무, rebalancer 등)이 더 있을 수 있습니다.
 `kakao.js`·`kakao-ui.js`·`icon.js`·`config.js`·`telegram.js`는 현재 쓰는 앱이 없습니다.
